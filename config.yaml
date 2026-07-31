@@ -1,0 +1,25 @@
+target_window: "TradingView \u2014 US500 / T Composite View"
+target_window_id: 3460
+interval_minutes: 5
+ollama:
+  host: http://localhost:11434
+  model: qwen3.5:9b
+ctrader_mcp:
+  url: http://127.0.0.1:9876/mcp/
+trading:
+  default_symbol: US500
+  pip_size: 0.1
+approval:
+  auto_approve: false
+  timeout_seconds: 60
+risk_limits:
+  max_position_size: 0.5
+  max_daily_loss_pct: 3
+  min_sl_distance_pips: 10
+  max_concurrent_positions: 1
+storage:
+  db_path: chartwatch.db
+  screenshot_dir: screenshots
+server:
+  host: 127.0.0.1
+  port: 8056

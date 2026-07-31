@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ChartWatch</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>ChartWatch</h1>
+    <span id="status-dot" class="dot"></span>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Scheduler</h2>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button id="start-cycle-btn">Start Cycle</button>
+        <button id="stop-cycle-btn" style="background:var(--red)">Stop</button>
+        <span id="scheduler-status" style="color:var(--muted);font-size:13px">Idle</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Setup</h2>
+      <label>Target window
+        <select id="window-select"></select>
+        <button id="refresh-windows">Refresh</button>
+      </label>
+      <label>Interval (minutes)
+        <input type="number" id="interval-input" min="1" value="5">
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="auto-approve-toggle">
+        Auto-approve trades (bypasses manual confirmation)
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>Log</h2>
+      <div id="log" style="font-size:13px;color:var(--muted);max-height:200px;overflow-y:auto;font-family:monospace;white-space:pre-wrap;background:var(--bg);padding:12px;border-radius:6px"></div>
+    </section>
+
+    <section class="card">
+      <h2>Ollama Response</h2>
+      <pre id="ollama-response" style="background:var(--bg);padding:12px;border-radius:6px;font-size:13px;white-space:pre-wrap;min-height:40px;color:var(--muted)">No response yet</pre>
+    </section>
+
+    <section class="card">
+      <h2>History</h2>
+      <table id="history-table">
+        <thead>
+          <tr><th>Time</th><th>Trend</th><th>Confidence</th><th>Action</th><th>Status</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <div id="approval-modal" class="modal hidden">
+    <div class="modal-content">
+      <h2>Trade proposal</h2>
+      <p id="approval-assessment"></p>
+      <pre id="approval-details"></pre>
+      <div class="countdown">Auto-deny in <span id="countdown-value">60</span>s</div>
+      <div class="modal-actions">
+        <button id="deny-btn" class="deny">Deny</button>
+        <button id="approve-btn" class="approve">Approve</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
