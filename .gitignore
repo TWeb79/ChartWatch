@@ -1,0 +1,6 @@
+# Ignore screenshots directory
+screenshots/
+# Ignore IDE configuration files
+.vscode/
+# Ignore operating system files
+.DS_Store
