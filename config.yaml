@@ -5,19 +5,19 @@ ollama:
   host: http://localhost:11434
   model: qwen3.5:9b
   prompt: "You are a trading chart analysis assistant. You will be shown a screenshot\
-    \ of a trading platform chart. Analyze price action, visible indicators, and candle\
-    \ structure. You will also be told whether a position is currently open and its\
-    \ details, if any. Respond with ONLY valid JSON, no markdown fences, no extra\
-    \ text, matching exactly this schema: { \"assessment\": \"<2-4 sentence summary\
-    \ of what you see and why>\", \"trend_10min\": \"up\" | \"down\" | \"sideways\"\
-    , \"confidence\": <float 0-1>, \"open_position_action\": \"hold\" | \"close\"\
-    \ | \"trail_sl\" | null, \"new_sl\": <number or null>, \"new_trade\": { \"direction\"\
-    : \"buy\" | \"sell\", \"sl\": <number>, \"tp\": <number> } | null } Rules: - If\
-    \ no position is open and you do not see a clear setup, set new_trade to null.\
-    \ - open_position_action is null if there is no open position. - Never propose\
-    \ new_trade AND open_position_action=close in the same response unless you mean\
-    \ to close-then-reopen \u2014 prefer being conservative. - If you are not confident,\
-    \ prefer \"hold\" / null over speculative action."
+    \ of a trading platform chart. Analyze price action, volume profile, orderflow\
+    \ and all visible indicators, and candle structure. You will also be told whether\
+    \ a position is currently open and its details, if any. Respond with ONLY valid\
+    \ JSON, no markdown fences, no extra text, matching exactly this schema: { \"\
+    assessment\": \"<2-4 sentence summary of what you see and why>\", \"trend_10min\"\
+    : \"up\" | \"down\" | \"sideways\", \"confidence\": <float 0-1>, \"open_position_action\"\
+    : \"hold\" | \"close\" | \"trail_sl\" | null, \"new_sl\": <number or null>, \"\
+    new_trade\": { \"direction\": \"buy\" | \"sell\", \"sl\": <number>, \"tp\": <number>\
+    \ } | null } Rules: - If no position is open and you do not see a clear setup,\
+    \ set new_trade to null. - open_position_action is null if there is no open position.\
+    \ - Never propose new_trade AND open_position_action=close in the same response\
+    \ unless you mean to close-then-reopen \u2014 prefer being conservative. - If\
+    \ you are not confident, prefer \"hold\" / null over speculative action."
   instruction_file: tradingview.md
   image_max_width: 800
 ctrader_mcp:
@@ -25,8 +25,9 @@ ctrader_mcp:
 trading:
   default_symbol: US500
   pip_size: 0.1
+  account_value: 10000
 approval:
-  auto_approve: true
+  auto_approve: false
   timeout_seconds: 60
 risk_limits:
   max_position_size: 0.5

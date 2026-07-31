@@ -3,10 +3,17 @@ model and returns a parsed decision dict. Forces JSON-only output so the
 rest of the pipeline never has to parse free text."""
 
 from __future__ import annotations
-import json
+
 import base64
+import json
+from pathlib import Path
 from typing import Any, Optional
+
 import ollama
+
+from .logger import get_logger, log_event
+
+log = get_logger("chartwatch.ollama")
 
 SYSTEM_PROMPT = """You are a trading chart analysis assistant. You will be shown \
 a screenshot of a trading platform chart. Analyze price action, visible \
@@ -48,12 +55,30 @@ def analyze(
     position_context: Optional[dict[str, Any]],
     model: str,
     host: str,
+    instruction_file: str = "",
 ) -> dict[str, Any]:
+    log_event(log, "ollama_analyze_start", {
+        "screenshot": screenshot_path,
+        "model": model,
+        "host": host,
+        "has_instruction_file": bool(instruction_file),
+    })
     client = ollama.Client(host=host)
+
+    instruction_text = ""
+    if instruction_file:
+        instruction_path = Path(__file__).resolve().parent.parent / instruction_file
+        if instruction_path.exists():
+            instruction_text = instruction_path.read_text(encoding="utf-8")
+            log_event(log, "ollama_instruction_loaded", {"path": str(instruction_path), "length": len(instruction_text)})
 
     context_str = (
         json.dumps(position_context) if position_context else "No open position."
     )
+
+    user_content = f"Current position context: {context_str}"
+    if instruction_text:
+        user_content += f"\n\nAdditional instructions:\n{instruction_text}"
 
     response = client.chat(
         model=model,
@@ -61,16 +86,23 @@ def analyze(
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": f"Current position context: {context_str}",
+                "content": user_content,
                 "images": [_encode_image(screenshot_path)],
             },
         ],
-        format="json",  # Ollama's structured-output mode where supported
+        format="json",
         options={"temperature": 0.2},
     )
 
     raw = response["message"]["content"]
+    log_event(log, "ollama_analyze_complete", {"model": model, "raw_length": len(raw)})
+    if not raw or not raw.strip():
+        log_event(log, "ollama_parse_error", {"model": model, "error": "empty response from model"})
+        raise ValueError(f"Model returned empty response for {screenshot_path}")
     try:
-        return json.loads(raw)
+        result = json.loads(raw)
+        log_event(log, "ollama_parse_ok", {"model": model})
+        return result
     except json.JSONDecodeError as e:
+        log_event(log, "ollama_parse_error", {"model": model, "error": str(e)})
         raise ValueError(f"Model did not return valid JSON: {raw!r}") from e

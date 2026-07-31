@@ -7,8 +7,9 @@
 </head>
 <body>
   <header>
-    <h1>by Inventions4All - github:TWeb79 - Version 2026-07-31</h1>
-    <span id="status-dot" class="dot"></span>
+    <h1>ChartWatch </h1>
+    <span id="status-dot" class="dot"></span><br />
+    <span id="status-text"><small><br />Inventions4All - github:TWeb79 - Version 2026-08-01</small></span>
   </header>
 
   <main>
@@ -21,19 +22,22 @@
       </div>
     </section>
 
-    <section class="card">
-      <h2>Setup</h2>
+    <section class="card" id="setup-section">
+      <h2>Setup <button id="setup-toggle" class="setup-toggle">▼</button></h2>
+      <div id="setup-body">
       <label>Target window
         <select id="window-select"></select>
         <button id="refresh-windows">Refresh</button>
       </label>
       <label>Interval (minutes)
         <input type="number" id="interval-input" min="1" value="5">
+        <small id="interval-min-hint"></small>
       </label>
       <label class="toggle">
         <input type="checkbox" id="auto-approve-toggle">
         Auto-approve trades (bypasses manual confirmation)
       </label>
+      </div>
     </section>
 
     <section class="card">
@@ -43,14 +47,29 @@
 
     <section class="card">
       <h2>Ollama Response</h2>
-      <pre id="ollama-response" class="ollama-response">No response yet</pre>
+      <div id="ollama-response" class="ollama-response">
+        <div class="ollama-summary">No response yet</div>
+      </div>
+      <div id="ollama-details" class="ollama-details hidden"></div>
+      <div id="ollama-expand-btn" class="ollama-expand-btn hidden">Expand</div>
+      <div id="ollama-screenshot-overlay" class="ollama-screenshot-overlay hidden">
+        <img id="ollama-screenshot-img" src="" alt="Screenshot" />
+        <button id="ollama-screenshot-close" class="ollama-screenshot-close">Close</button>
+      </div>
     </section>
 
     <section class="card">
       <h2>History</h2>
       <table id="history-table">
         <thead>
-          <tr><th>Time</th><th>Trend</th><th>Confidence</th><th>Action</th><th>Status</th></tr>
+          <tr>
+            <th></th>
+            <th>Time</th>
+            <th>Trend</th>
+            <th>Confidence</th>
+            <th>Action</th>
+            <th>Status</th>
+          </tr>
         </thead>
         <tbody></tbody>
       </table>

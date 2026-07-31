@@ -209,7 +209,30 @@ class TestStorage:
             db_path = f.name
         try:
             s = storage.Storage(db_path)
-            assert s.daily_pnl_pct() == 0.0
+            assert s.daily_pnl_pct(account_value=10000) == 0.0
+        finally:
+            os.unlink(db_path)
+
+    def test_daily_pnl_pct_returns_percentage(self):
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            s = storage.Storage(db_path)
+            cycle_id = s.new_cycle("/tmp/test.png")
+            s.set_action(cycle_id, "executed_auto", mcp_result={"pnl": 300.0})
+            pnl_pct = s.daily_pnl_pct(account_value=10000)
+            assert pnl_pct == 3.0
+        finally:
+            os.unlink(db_path)
+
+    def test_daily_pnl_pct_returns_zero_when_account_value_is_zero(self):
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            s = storage.Storage(db_path)
+            cycle_id = s.new_cycle("/tmp/test.png")
+            s.set_action(cycle_id, "executed_auto", mcp_result={"pnl": 300.0})
+            assert s.daily_pnl_pct(account_value=0) == 0.0
         finally:
             os.unlink(db_path)
 

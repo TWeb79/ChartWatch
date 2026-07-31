@@ -5,6 +5,10 @@ the MCP client."""
 from __future__ import annotations
 from typing import Any, Optional
 
+from .logger import get_logger, log_event
+
+log = get_logger("chartwatch.guardrails")
+
 
 class GuardrailRejection(Exception):
     pass
@@ -21,6 +25,9 @@ def check(
     """Raises GuardrailRejection with a human-readable reason, or returns None."""
 
     if daily_pnl_pct <= -abs(limits["max_daily_loss_pct"]):
+        log_event(log, "guardrail_reject", {
+            "reason": f"daily loss limit hit ({daily_pnl_pct:.2f}%)",
+        })
         raise GuardrailRejection(
             f"daily loss limit hit ({daily_pnl_pct:.2f}%) — no new actions today"
         )
@@ -28,6 +35,9 @@ def check(
     new_trade = decision.get("new_trade")
     if new_trade:
         if open_positions_count >= limits["max_concurrent_positions"]:
+            log_event(log, "guardrail_reject", {
+                "reason": f"max concurrent positions reached ({open_positions_count})",
+            })
             raise GuardrailRejection(
                 f"max concurrent positions reached ({open_positions_count})"
             )
@@ -36,6 +46,9 @@ def check(
             sl_distance = abs(current_price - new_trade["sl"])
             sl_distance_pips = sl_distance / pip_size
             if sl_distance_pips < limits["min_sl_distance_pips"]:
+                log_event(log, "guardrail_reject", {
+                    "reason": f"SL too close: {sl_distance_pips:.1f} pips",
+                })
                 raise GuardrailRejection(
                     f"SL too close: {sl_distance_pips:.1f} pips "
                     f"(min {limits['min_sl_distance_pips']})"
@@ -44,8 +57,10 @@ def check(
         direction = new_trade["direction"]
         sl, tp = new_trade["sl"], new_trade["tp"]
         if direction == "buy" and not (sl < tp):
+            log_event(log, "guardrail_reject", {"reason": "buy order: SL must be below TP"})
             raise GuardrailRejection("buy order: SL must be below TP")
         if direction == "sell" and not (sl > tp):
+            log_event(log, "guardrail_reject", {"reason": "sell order: SL must be above TP"})
             raise GuardrailRejection("sell order: SL must be above TP")
 
     # max_position_size is enforced at the MCP call site where lot size is set —

@@ -1,5 +1,5 @@
 # ChartWatch
-by Inventions4All - github:TWeb79 - Version 2026-07-31
+by Inventions4All - github:TWeb79 - Version 2026-08-01
 
 
 Periodically screenshots a chosen macOS window (e.g. cTrader), sends it to a

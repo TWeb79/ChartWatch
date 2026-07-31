@@ -19,7 +19,9 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-log = logging.getLogger("ai_trader.mcp")
+from .logger import get_logger, log_event
+
+log = get_logger("chartwatch.mcp")
 
 TOOL_NAMES = {
     "get_positions": "get_positions",
@@ -71,6 +73,7 @@ class CTraderMCPClient:
 
     async def connect(self) -> None:
         """Connect to the cTrader MCP server and discover available tools."""
+        log_event(log, "mcp_connect_start", {"url": self.url})
         read, write = await self._stack.enter_async_context(
             streamable_http_client(self.url),
         )
@@ -81,10 +84,21 @@ class CTraderMCPClient:
 
         tools_result = await self.session.list_tools()
         self.available_tools = {t.name: t for t in tools_result.tools}
-        log.info("Connected to cTrader MCP server. Available tools:")
-        for name, tool in self.available_tools.items():
-            desc = (tool.description or "").strip().replace("\n", " ")[:100]
-            log.info("  - %s: %s", name, desc)
+        log_event(log, "mcp_connect_ok", {
+            "url": self.url,
+            "tools": list(self.available_tools.keys()),
+        })
+        if not self.available_tools:
+            log.warning(
+                "cTrader MCP server at %s returned no tools. "
+                "Verify the server is running and properly configured.",
+                self.url,
+            )
+        else:
+            log.info("Connected to cTrader MCP server. Available tools:")
+            for name, tool in self.available_tools.items():
+                desc = (tool.description or "").strip().replace("\n", " ")[:100]
+                log.info("  - %s: %s", name, desc)
 
     async def call(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """Call a tool on the cTrader MCP server.
@@ -99,20 +113,31 @@ class CTraderMCPClient:
         Raises:
             RuntimeError: If the tool is not available on the server.
         """
+        log_event(log, "mcp_call", {"tool": tool_name, "arguments": arguments})
         if tool_name not in self.available_tools:
+            log_event(log, "mcp_call_error", {
+                "tool": tool_name,
+                "error": "tool not found",
+                "available": list(self.available_tools.keys()),
+            })
             raise RuntimeError(
                 f"Tool '{tool_name}' not found. "
                 f"Available: {list(self.available_tools.keys())}. "
                 "Update TOOL_NAMES to match your server.",
             )
         result = await self.session.call_tool(tool_name, arguments)
+        log_event(log, "mcp_response", {"tool": tool_name, "status": "ok"})
         for block in result.content:
             if hasattr(block, "text"):
                 try:
                     return json.loads(block.text)
                 except (json.JSONDecodeError, TypeError):
-                    return block.text
-        return result
+                    raise RuntimeError(
+                        f"Tool '{tool_name}' returned non-JSON text: {block.text!r}"
+                    )
+        raise RuntimeError(
+            f"Tool '{tool_name}' returned no text content in result blocks"
+        )
 
     async def get_open_positions(self) -> list[dict[str, Any]]:
         """Fetch open positions from the cTrader MCP server."""
@@ -151,3 +176,10 @@ class CTraderMCPClient:
     async def close(self) -> None:
         """Close the MCP connection."""
         await self._stack.aclose()
+
+    async def disconnect(self) -> None:
+        """Disconnect and reset state for reconnection."""
+        await self.close()
+        self._stack = AsyncExitStack()
+        self.session = None
+        self.available_tools = {}

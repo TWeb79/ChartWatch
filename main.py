@@ -1,5 +1,5 @@
 """Run with: python main.py
-Then open http://localhost:8765 in a browser."""
+Then open http://localhost:8056 in a browser."""
 
 import uvicorn
 from chartwatch import config as cfg_module
