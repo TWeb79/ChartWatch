@@ -39,12 +39,16 @@ class Scheduler:
 
     async def start(self):
         self._running = True
-        while self._running:
-            try:
-                await self._run_cycle()
-            except Exception as e:
-                await self.on_event("error", {"message": str(e)})
-            await asyncio.sleep(self.cfg["interval_minutes"] * 60)
+        await self.mcp.connect()
+        try:
+            while self._running:
+                try:
+                    await self._run_cycle()
+                except Exception as e:
+                    await self.on_event("error", {"message": str(e)})
+                await asyncio.sleep(self.cfg["interval_minutes"] * 60)
+        finally:
+            await self.mcp.close()
 
     def stop(self):
         self._running = False
@@ -52,6 +56,8 @@ class Scheduler:
     async def trigger_cycle(self):
         """Run a single cycle immediately without waiting for the interval."""
         try:
+            if not self.mcp.session:
+                await self.mcp.connect()
             await self._run_cycle()
         except Exception as e:
             await self.on_event("error", {"message": str(e)})

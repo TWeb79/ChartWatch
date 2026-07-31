@@ -18,6 +18,8 @@ const denyBtn = document.getElementById("deny-btn");
 
 let countdownTimer = null;
 let currentCycleId = null;
+let lastCapturePath = null;
+let lastCaptureTime = 0;
 
 function log(msg) {
   const ts = new Date().toLocaleTimeString();
@@ -144,8 +146,11 @@ function connectWs() {
       reconnectTimer = null;
     }
   };
-  ws.onmessage = (evt) => {
+ws.onmessage = (evt) => {
     const { type, payload } = JSON.parse(evt.data);
+    if (type === "cycle_start") {
+      ollamaResponseEl.textContent = "Analyzing...";
+    }
     if (type === "approval_requested") {
       showApproval(payload.cycle_id, payload.decision, payload.timeout_s);
     }
@@ -165,13 +170,15 @@ function connectWs() {
       } catch {
         ollamaResponseEl.textContent = String(payload.response);
       }
-    }
-    if (type === "cycle_start") {
-      log("Cycle started");
-      ollamaResponseEl.textContent = "Waiting for response...";
+      log("Ollama response received and displayed");
     }
     if (type === "capture") {
-      log(`Screenshot captured: ${payload.path}`);
+      const now = Date.now();
+      if (payload.path !== lastCapturePath || now - lastCaptureTime > 2000) {
+        log(`Screenshot captured: ${payload.path}`);
+        lastCapturePath = payload.path;
+        lastCaptureTime = now;
+      }
     }
   };
   ws.onclose = () => {

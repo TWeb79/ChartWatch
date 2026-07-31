@@ -7,4 +7,6 @@ screenshots/
 venv/
 .ruff_cache/
 .mypy_cache/
+__pycache__/
+.pytest_cache/
 chartwatch.db

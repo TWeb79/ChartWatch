@@ -146,6 +146,43 @@ button.approve { background: var(--green); }
 #start-cycle-btn { background: var(--green); }
 #stop-cycle-btn { background: var(--red); }
 
+.scheduler-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.status-idle {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.log-area {
+  font-size: 13px;
+  color: var(--muted);
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: monospace;
+  white-space: pre-wrap;
+  background: var(--bg);
+  padding: 12px;
+  border-radius: 6px;
+}
+
+.ollama-response {
+  background: var(--bg);
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  min-height: 40px;
+  color: var(--muted);
+}
+
+.btn-red { background: var(--red); }
+.btn-denied { background: var(--red); }
+.btn-approved { background: var(--green); }
+
 #log {
   font-family: "SF Mono", "Menlo", "Monaco", monospace;
   font-size: 12px;

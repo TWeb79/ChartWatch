@@ -1,19 +1,32 @@
 """Thin wrapper around the cTrader MCP server. This is the ONLY module
-allowed to place/modify/close real trades — keep it small and well-tested.
+allowed to place/modify/cancel real trades — keep it small and well-tested.
 
-TODO: confirm the exact tool names/parameters the server exposes (call
-list_tools() once connected and adjust the calls below to match — tool
-names below are best-guess placeholders based on common MCP trading
-server conventions).
+Uses AsyncExitStack for async lifecycle management, dynamic tool discovery
+via list_tools(), and a TOOL_NAMES mapping for logical-to-actual tool name
+resolution.
+
+Author: Inventions4All - github:TWeb79
+Version: 1.0.0  (deployment: 2026-07-31)
 """
 
 from __future__ import annotations
+
 import json
+import logging
+from contextlib import AsyncExitStack
 from typing import Any
-from contextlib import asynccontextmanager
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+
+log = logging.getLogger("ai_trader.mcp")
+
+TOOL_NAMES = {
+    "get_positions": "get_positions",
+    "open_position": "open_position",
+    "close_position": "close_position",
+    "modify_position": "modify_position",
+}
 
 
 def _extract_text(result: Any) -> str:
@@ -48,74 +61,93 @@ def _parse_json_text(text: str) -> Any:
 
 
 class CTraderMCPClient:
-    def __init__(self, url: str):
+    """Thin wrapper around an MCP ClientSession talking to the cTrader MCP server."""
+
+    def __init__(self, url: str) -> None:
         self.url = url
+        self._stack = AsyncExitStack()
+        self.session: ClientSession | None = None
+        self.available_tools: dict[str, Any] = {}
 
-    @asynccontextmanager
-    async def _session(self):
-        async with streamable_http_client(self.url) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                yield session
+    async def connect(self) -> None:
+        """Connect to the cTrader MCP server and discover available tools."""
+        read, write = await self._stack.enter_async_context(
+            streamable_http_client(self.url),
+        )
+        self.session = await self._stack.enter_async_context(
+            ClientSession(read, write),
+        )
+        await self.session.initialize()
 
-    async def list_tools(self) -> list[str]:
-        async with self._session() as session:
-            tools = await session.list_tools()
-            return [t.name for t in tools.tools]
+        tools_result = await self.session.list_tools()
+        self.available_tools = {t.name: t for t in tools_result.tools}
+        log.info("Connected to cTrader MCP server. Available tools:")
+        for name, tool in self.available_tools.items():
+            desc = (tool.description or "").strip().replace("\n", " ")[:100]
+            log.info("  - %s: %s", name, desc)
+
+    async def call(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        """Call a tool on the cTrader MCP server.
+
+        Args:
+            tool_name: Logical tool name (mapped via TOOL_NAMES).
+            arguments: Dict of arguments for the tool call.
+
+        Returns:
+            Parsed tool result (dict or list).
+
+        Raises:
+            RuntimeError: If the tool is not available on the server.
+        """
+        if tool_name not in self.available_tools:
+            raise RuntimeError(
+                f"Tool '{tool_name}' not found. "
+                f"Available: {list(self.available_tools.keys())}. "
+                "Update TOOL_NAMES to match your server.",
+            )
+        result = await self.session.call_tool(tool_name, arguments)
+        for block in result.content:
+            if hasattr(block, "text"):
+                try:
+                    return json.loads(block.text)
+                except (json.JSONDecodeError, TypeError):
+                    return block.text
+        return result
 
     async def get_open_positions(self) -> list[dict[str, Any]]:
-        async with self._session() as session:
-            result = await session.call_tool("get_positions", {})
-            text = _extract_text(result)
-            try:
-                data = json.loads(text)
-            except (json.JSONDecodeError, ValueError):
-                return []
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict):
-                return [data]
-            return []
+        """Fetch open positions from the cTrader MCP server."""
+        raw = await self.call(TOOL_NAMES["get_positions"], {})
+        if isinstance(raw, list):
+            return raw
+        if isinstance(raw, dict):
+            return [raw]
+        return []
 
     async def open_position(
         self, symbol: str, direction: str, volume: float, sl: float, tp: float
     ) -> dict[str, Any]:
-        async with self._session() as session:
-            result = await session.call_tool(
-                "open_position",
-                {
-                    "symbol": symbol,
-                    "direction": direction,  # "buy" | "sell"
-                    "volume": volume,
-                    "stop_loss": sl,
-                    "take_profit": tp,
-                },
-            )
-            text = _extract_text(result)
-            try:
-                return _parse_json_text(text)
-            except (json.JSONDecodeError, ValueError):
-                return {"raw": text}
+        """Open a new position on the cTrader MCP server."""
+        return await self.call(TOOL_NAMES["open_position"], {
+            "symbol": symbol,
+            "direction": direction,
+            "volume": volume,
+            "stop_loss": sl,
+            "take_profit": tp,
+        })
 
     async def close_position(self, position_id: str) -> dict[str, Any]:
-        async with self._session() as session:
-            result = await session.call_tool(
-                "close_position", {"position_id": position_id}
-            )
-            text = _extract_text(result)
-            try:
-                return _parse_json_text(text)
-            except (json.JSONDecodeError, ValueError):
-                return {"raw": text}
+        """Close an existing position on the cTrader MCP server."""
+        return await self.call(TOOL_NAMES["close_position"], {
+            "position_id": position_id,
+        })
 
     async def modify_sl(self, position_id: str, new_sl: float) -> dict[str, Any]:
-        async with self._session() as session:
-            result = await session.call_tool(
-                "modify_position",
-                {"position_id": position_id, "stop_loss": new_sl},
-            )
-            text = _extract_text(result)
-            try:
-                return _parse_json_text(text)
-            except (json.JSONDecodeError, ValueError):
-                return {"raw": text}
+        """Modify the stop-loss of an existing position."""
+        return await self.call(TOOL_NAMES["modify_position"], {
+            "position_id": position_id,
+            "stop_loss": new_sl,
+        })
+
+    async def close(self) -> None:
+        """Close the MCP connection."""
+        await self._stack.aclose()

@@ -7,17 +7,17 @@
 </head>
 <body>
   <header>
-    <h1>by TWeb79 - Version 1.0</h1>
+    <h1>by Inventions4All - github:TWeb79 - Version 2026-07-31</h1>
     <span id="status-dot" class="dot"></span>
   </header>
 
   <main>
     <section class="card">
       <h2>Scheduler</h2>
-      <div style="display:flex;gap:10px;align-items:center">
+      <div class="scheduler-controls">
         <button id="start-cycle-btn">Start Cycle</button>
-        <button id="stop-cycle-btn" style="background:var(--red)">Stop</button>
-        <span id="scheduler-status" style="color:var(--muted);font-size:13px">Idle</span>
+        <button id="stop-cycle-btn" class="btn-red">Stop</button>
+        <span id="scheduler-status" class="status-idle">Idle</span>
       </div>
     </section>
 
@@ -38,12 +38,12 @@
 
     <section class="card">
       <h2>Log</h2>
-      <div id="log" style="font-size:13px;color:var(--muted);max-height:200px;overflow-y:auto;font-family:monospace;white-space:pre-wrap;background:var(--bg);padding:12px;border-radius:6px"></div>
+      <div id="log" class="log-area"></div>
     </section>
 
     <section class="card">
       <h2>Ollama Response</h2>
-      <pre id="ollama-response" style="background:var(--bg);padding:12px;border-radius:6px;font-size:13px;white-space:pre-wrap;min-height:40px;color:var(--muted)">No response yet</pre>
+      <pre id="ollama-response" class="ollama-response">No response yet</pre>
     </section>
 
     <section class="card">
@@ -64,8 +64,8 @@
       <pre id="approval-details"></pre>
       <div class="countdown">Auto-deny in <span id="countdown-value">60</span>s</div>
       <div class="modal-actions">
-        <button id="deny-btn" class="deny">Deny</button>
-        <button id="approve-btn" class="approve">Approve</button>
+        <button id="deny-btn" class="btn-denied">Deny</button>
+        <button id="approve-btn" class="btn-approved">Approve</button>
       </div>
     </div>
   </div>

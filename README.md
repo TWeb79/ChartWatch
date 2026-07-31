@@ -1,5 +1,6 @@
-# by TWeb79 - Version 1.0
 # ChartWatch
+by Inventions4All - github:TWeb79 - Version 2026-07-31
+
 
 Periodically screenshots a chosen macOS window (e.g. cTrader), sends it to a
 local Ollama vision model for analysis, and — after approval (manual, with a
@@ -16,7 +17,7 @@ pip install -r requirements.txt
 
 1. Pull a vision-capable model in Ollama, e.g.:
    ```bash
-   ollama pull qwen2.5vl
+   ollama pull qwen3.5:9b
    ```
    Confirm the exact tag matches `ollama.model` in `config.yaml`.
 
@@ -38,7 +39,9 @@ pip install -r requirements.txt
 
 - `chartwatch/mcp_client.py`: tool names (`open_position`, `close_position`,
   `modify_position`, `get_positions`) are best-guess placeholders — call
-  `list_tools()` against the real server once connected and adjust.
+  `list_tools()` against the real server once connected and adjust. The cTrader
+  MCP server on port 9876 does not currently expose standard MCP protocol
+  endpoints; see `mcp_client.py` inline TODO for the verification script.
 - `chartwatch/guardrails.py`: pip-size conversion is hardcoded for a
   4-decimal FX pair — needs per-symbol handling for other instrument types.
 - `chartwatch/scheduler.py`: `daily_pnl_pct` and `current_price` are stubbed
