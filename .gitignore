@@ -4,3 +4,4 @@ screenshots/
 .vscode/
 # Ignore operating system files
 .DS_Store
+venv/
