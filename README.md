@@ -1,3 +1,4 @@
+# by TWeb79 - Version 1.0
 # ChartWatch
 
 Periodically screenshots a chosen macOS window (e.g. cTrader), sends it to a
