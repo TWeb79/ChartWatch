@@ -35,13 +35,15 @@ def save(cfg: dict[str, Any]) -> None:
 
 
 def update(patch: dict[str, Any]) -> dict[str, Any]:
+    """Update config with a patch dict, thread-safe for the full operation."""
     log_event(log, "config_update", {"patch": patch})
-    cfg = load()
-    for k, v in patch.items():
-        if isinstance(v, dict) and isinstance(cfg.get(k), dict):
-            cfg[k].update(v)
-        else:
-            cfg[k] = v
-    save(cfg)
+    with _lock:
+        cfg = load()
+        for k, v in patch.items():
+            if isinstance(v, dict) and isinstance(cfg.get(k), dict):
+                cfg[k].update(v)
+            else:
+                cfg[k] = v
+        save(cfg)
     log_event(log, "config_update_ok", {"updated_keys": list(patch.keys())})
     return cfg

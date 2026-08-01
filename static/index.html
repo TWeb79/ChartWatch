@@ -2,89 +2,212 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>ChartWatch</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChartWatch — Trading Assistant</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <h1>ChartWatch </h1>
-    <span id="status-dot" class="dot"></span><br />
-    <span id="status-text"><small><br />Inventions4All - github:TWeb79 - Version 2026-08-01</small></span>
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+        </svg>
+        <h1>ChartWatch</h1>
+      </div>
+      <span class="version-badge">v2026.08</span>
+    </div>
+    <div class="header-right">
+      <span id="ws-status" class="badge disconnected">WS: connecting...</span>
+      <span id="mcp-status" class="badge disconnected">MCP: offline</span>
+    </div>
   </header>
 
-  <main>
-    <section class="card">
-      <h2>Scheduler</h2>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <button class="nav-item active" data-section="dashboard">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"></rect>
+          <rect x="14" y="3" width="7" height="7"></rect>
+          <rect x="14" y="14" width="7" height="7"></rect>
+          <rect x="3" y="14" width="7" height="7"></rect>
+        </svg>
+        Dashboard
+      </button>
+      <button class="nav-item" data-section="scheduler">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+        Scheduler
+      </button>
+      <button class="nav-item" data-section="history">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        History
+      </button>
+      <button class="nav-item" data-section="settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"></path>
+        </svg>
+        Settings
+      </button>
+    </nav>
+
+    <main class="main-content">
+      <!-- Dashboard Section -->
+      <section id="section-dashboard" class="section active">
+        <div class="dashboard-stack">
+          <div class="card">
+            <h2>Scheduler</h2>
       <div class="scheduler-controls">
-        <button id="start-cycle-btn">Start Cycle</button>
-        <button id="stop-cycle-btn" class="btn-red">Stop</button>
-        <span id="scheduler-status" class="status-idle">Idle</span>
+        <button id="start-cycle-btn" class="btn-primary">Start Cycle</button>
+        <button id="stop-cycle-btn" class="btn-danger">Stop</button>
+        <span id="scheduler-status" class="badge">Idle</span>
+        <span id="next-cycle-countdown" class="countdown-badge hidden"></span>
       </div>
-    </section>
+       <div class="health-bar">
+         <span id="health-mcp" class="badge checking">MCP: checking...</span>
+         <span id="health-ollama" class="badge checking">Ollama: checking...</span>
+       </div>
+       <div class="prereq-bar">
+         <span id="prereq-ctrader" class="badge checking">cTrader: checking...</span>
+         <span id="prereq-mcp" class="badge checking">MCP: checking...</span>
+       </div>
+            <div id="setup-body" class="setup-body">
+              <label>Target Window
+                <select id="window-select"></select>
+                 <button id="refresh-windows" class="btn-ghost">Refresh</button>
+              </label>
+              <label>Interval (minutes)
+                <input type="number" id="interval-input" min="1" value="5">
+                <small id="interval-min-hint"></small>
+              </label>
+              <label class="toggle">
+                <input type="checkbox" id="auto-approve-toggle">
+                <span class="toggle-slider"></span>
+                Auto-approve trades
+              </label>
+            </div>
+          </div>
 
-    <section class="card" id="setup-section">
-      <h2>Setup <button id="setup-toggle" class="setup-toggle">▼</button></h2>
-      <div id="setup-body">
-      <label>Target window
-        <select id="window-select"></select>
-        <button id="refresh-windows">Refresh</button>
-      </label>
-      <label>Interval (minutes)
-        <input type="number" id="interval-input" min="1" value="5">
-        <small id="interval-min-hint"></small>
-      </label>
-      <label class="toggle">
-        <input type="checkbox" id="auto-approve-toggle">
-        Auto-approve trades (bypasses manual confirmation)
-      </label>
-      </div>
-    </section>
+          <div class="card">
+            <h2>Latest Analysis</h2>
+            <div id="ollama-response" class="ollama-response ollama-empty">
+              <div class="ollama-summary">No response yet</div>
+            </div>
+            <div id="ollama-details" class="ollama-details hidden"></div>
+            <div id="ollama-expand-btn" class="ollama-expand-btn hidden">Expand</div>
+            <div id="ollama-screenshot-overlay" class="ollama-screenshot-overlay hidden">
+              <img id="ollama-screenshot-img" src="" alt="Screenshot" />
+              <button id="ollama-screenshot-close" class="ollama-screenshot-close">Close</button>
+            </div>
+          </div>
 
-    <section class="card">
-      <h2>Log</h2>
-      <div id="log" class="log-area"></div>
-    </section>
+          <div class="card">
+            <h2>Cycle History</h2>
+            <table id="history-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Time</th>
+                  <th>Trend</th>
+                  <th>Confidence</th>
+                  <th>Action</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
-    <section class="card">
-      <h2>Ollama Response</h2>
-      <div id="ollama-response" class="ollama-response">
-        <div class="ollama-summary">No response yet</div>
-      </div>
-      <div id="ollama-details" class="ollama-details hidden"></div>
-      <div id="ollama-expand-btn" class="ollama-expand-btn hidden">Expand</div>
-      <div id="ollama-screenshot-overlay" class="ollama-screenshot-overlay hidden">
-        <img id="ollama-screenshot-img" src="" alt="Screenshot" />
-        <button id="ollama-screenshot-close" class="ollama-screenshot-close">Close</button>
-      </div>
-    </section>
+      <!-- History Section -->
+      <section id="section-history" class="section">
+        <div class="card">
+          <h2>Cycle History</h2>
+          <table id="history-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Time</th>
+                <th>Trend</th>
+                <th>Confidence</th>
+                <th>Action</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
 
-    <section class="card">
-      <h2>History</h2>
-      <table id="history-table">
-        <thead>
-          <tr>
-            <th></th>
-            <th>Time</th>
-            <th>Trend</th>
-            <th>Confidence</th>
-            <th>Action</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </section>
-  </main>
+      <!-- Settings Section -->
+      <section id="section-settings" class="section">
+        <div class="card">
+          <h2>Configuration</h2>
+          <div class="settings-grid">
+<div class="setting-group">
+                <h3>LLM Provider</h3>
+                <label>Provider
+                  <select id="setting-provider">
+                    <option value="ollama">Ollama (local)</option>
+                    <option value="nvidia">NVIDIA NIM</option>
+                  </select>
+                </label>
+              </div>
+              <div id="nvidia-settings" class="hidden">
+                <div class="setting-group">
+                  <h3>NVIDIA</h3>
+                  <label>API Key
+                    <input type="password" id="setting-nvidia-api-key" placeholder="Enter NVIDIA API key">
+                  </label>
+                  <label>Model
+                    <input type="text" id="setting-nvidia-model" value="thinkingmachines/inkling">
+                  </label>
+                </div>
+              </div>
+              <div class="setting-group">
+                <h3>Trading</h3>
+                <label>Default Symbol
+                  <input type="text" id="setting-symbol" value="US500">
+                </label>
+                <label>Pip Size
+                  <input type="number" id="setting-pip" value="0.1" step="0.01">
+                </label>
+              </div>
+              <div class="setting-group">
+                <h3>Risk Limits</h3>
+                <label>Max Daily Loss (%)
+                  <input type="number" id="setting-max-loss" value="3" step="0.1">
+                </label>
+                <label>Max Concurrent Positions
+                  <input type="number" id="setting-max-positions" value="5">
+                </label>
+                <label>Min SL Distance (pips)
+                  <input type="number" id="setting-min-sl" value="10">
+                </label>
+              </div>
+          </div>
+          <button id="save-settings-btn" class="btn-primary" style="margin-top: 20px;">Save Configuration</button>
+        </div>
+      </section>
+    </main>
+  </div>
 
+  <!-- Approval Modal -->
   <div id="approval-modal" class="modal hidden">
     <div class="modal-content">
-      <h2>Trade proposal</h2>
+      <h2>Trade Proposal</h2>
       <p id="approval-assessment"></p>
       <pre id="approval-details"></pre>
       <div class="countdown">Auto-deny in <span id="countdown-value">60</span>s</div>
       <div class="modal-actions">
-        <button id="deny-btn" class="btn-denied">Deny</button>
-        <button id="approve-btn" class="btn-approved">Approve</button>
+        <button id="deny-btn" class="btn-danger">Deny</button>
+        <button id="approve-btn" class="btn-success">Approve</button>
       </div>
     </div>
   </div>

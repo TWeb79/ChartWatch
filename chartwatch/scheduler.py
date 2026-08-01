@@ -8,7 +8,7 @@ import asyncio
 import time
 from typing import Any, Callable, Optional
 
-from . import capture, decision, guardrails, ollama_client, storage
+from . import capture, ctrader_check, decision, guardrails, llm_client, storage
 from .logger import get_logger, log_event
 from .mcp_client import CTraderMCPClient
 
@@ -73,6 +73,15 @@ class Scheduler:
 
         try:
             while self._running:
+                ctrader_status = ctrader_check.check_ctrader_running()
+                if not ctrader_status.get("running"):
+                    await self.on_event("error", {
+                        "message": "cTrader not started — please launch cTrader before running cycles"
+                    })
+                    log_event(log, "ctrader_not_running", ctrader_status)
+                    await asyncio.sleep(10)
+                    continue
+
                 if not self.mcp.session:
                     try:
                         await self.mcp.connect()
@@ -102,12 +111,42 @@ class Scheduler:
         finally:
             await self.mcp.close()
 
+    def _cleanup_old_screenshots(self) -> None:
+        """Remove screenshots older than the retention period."""
+        import os
+        from pathlib import Path
+        
+        retention_days = self.cfg.get("storage", {}).get("screenshot_retention_days", 7)
+        screenshot_dir = Path(self.cfg.get("storage", {}).get("screenshot_dir", "screenshots"))
+        if not screenshot_dir.exists():
+            return
+        
+        cutoff = time.time() - (retention_days * 86400)
+        removed = 0
+        for file_path in screenshot_dir.glob("*.png"):
+            try:
+                if file_path.stat().st_mtime < cutoff:
+                    file_path.unlink()
+                    removed += 1
+            except OSError:
+                continue
+        if removed > 0:
+            log_event(log, "screenshot_cleanup", {"removed": removed, "retention_days": retention_days})
+
     def stop(self):
         self._running = False
 
     async def trigger_cycle(self):
         """Run a single cycle immediately without waiting for the interval."""
         try:
+            ctrader_status = ctrader_check.check_ctrader_running()
+            if not ctrader_status.get("running"):
+                await self.on_event("error", {
+                    "message": "cTrader not started — please launch cTrader before running cycles"
+                })
+                log_event(log, "ctrader_not_running", ctrader_status)
+                return
+
             if not self.mcp.session:
                 max_retries = 3
                 delay = 1.0
@@ -134,6 +173,8 @@ class Scheduler:
             await self.on_event("error", {"message": "no target window configured"})
             return
 
+        self._cleanup_old_screenshots()
+
         log_event(log, "cycle_start", {"window_id": window_id})
         await self.on_event("cycle_start", {})
 
@@ -157,37 +198,35 @@ class Scheduler:
             positions = []
         position_context = positions[0] if positions else None
 
-        # 3. ask Ollama (run in thread to avoid blocking the event loop)
-        await self.on_event("log", {"message": "Submitting screenshot to Ollama for analysis..."})
-        log_event(log, "ollama_submit", {"cycle_id": cycle_id, "model": cfg["ollama"]["model"]})
+        # 3. ask LLM (run in thread to avoid blocking the event loop)
+        await self.on_event("log", {"message": "Submitting screenshot to LLM for analysis..."})
+        log_event(log, "llm_submit", {"cycle_id": cycle_id, "provider": self.cfg.get("provider", "ollama"), "model": self.cfg.get("llm_model", self.cfg.get("ollama", {}).get("model", ""))})
         try:
             ollama_start = time.monotonic()
             raw = await asyncio.to_thread(
-                ollama_client.analyze,
+                llm_client.analyze,
                 screenshot_path,
                 position_context,
-                model=cfg["ollama"]["model"],
-                host=cfg["ollama"]["host"],
-                instruction_file=cfg["ollama"].get("instruction_file", ""),
+                self.cfg,
             )
             ollama_elapsed = time.monotonic() - ollama_start
             self._ollama_times.append(ollama_elapsed)
             if len(self._ollama_times) > self._ollama_window:
                 self._ollama_times = self._ollama_times[-self._ollama_window:]
-            log_event(log, "ollama_timing", {
+            log_event(log, "llm_timing", {
                 "cycle_id": cycle_id,
                 "elapsed_s": round(ollama_elapsed, 2),
                 "avg_s": round(self.avg_ollama_time(), 2),
             })
         except Exception as e:
-            log_event(log, "ollama_error", {"cycle_id": cycle_id, "error": str(e)})
+            log_event(log, "llm_error", {"cycle_id": cycle_id, "error": str(e)})
             self.store.set_action(cycle_id, "error")
             await self.on_event("error", {"cycle_id": cycle_id, "message": str(e)})
             return
         self.store.set_model_response(cycle_id, raw)
-        log_event(log, "ollama_response", {"cycle_id": cycle_id, "response": raw})
+        log_event(log, "llm_response", {"cycle_id": cycle_id, "response": raw})
         await self.on_event("model_response", {"cycle_id": cycle_id, "response": raw})
-        await self.on_event("log", {"message": "Ollama response received", "response": raw})
+        await self.on_event("log", {"message": "LLM response received", "response": raw})
 
         # 4. validate shape
         try:
@@ -270,18 +309,26 @@ class Scheduler:
     async def _execute(
         self, cycle_id: int, d: dict[str, Any], position_context: Optional[dict]
     ) -> None:
+        open_position_action = d.get("open_position_action")
+        new_trade = d.get("new_trade")
+
+        if open_position_action == "close" and new_trade:
+            raise ValueError(
+                "Cannot close and open a new position in the same cycle. "
+                "Please choose one action per cycle."
+            )
+
         result = {}
         if position_context:
-            action = d.get("open_position_action")
             pos_id = position_context.get("id")
             if isinstance(pos_id, str):
-                if action == "close":
+                if open_position_action == "close":
                     result = await self.mcp.close_position(pos_id)
-                elif action == "trail_sl" and d.get("new_sl") is not None:
+                elif open_position_action == "trail_sl" and d.get("new_sl") is not None:
                     result = await self.mcp.modify_sl(pos_id, d["new_sl"])
 
-        if d.get("new_trade"):
-            t = d["new_trade"]
+        if new_trade:
+            t = new_trade
             default_symbol = self.cfg.get("trading", {}).get("default_symbol")
             symbol = position_context.get("symbol") if position_context else default_symbol
             if not isinstance(symbol, str):

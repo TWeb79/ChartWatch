@@ -4,31 +4,24 @@
 
 - None remaining
 
-## MCP Connection
+## Medium Priority Bugs
 
-- **`mcp_client.py` tool names** — best-guess placeholders; call `list_tools()` against the real cTrader MCP server once connected. The cTrader MCP server is running on port 9876 but does not currently expose standard MCP protocol endpoints (`/mcp/`, `/sse`, `/streamable` all return 404). The server may use a non-standard path or require additional configuration. See the inline TODO in `mcp_client.py` for the verification script and troubleshooting steps.
+- None remaining
 
-## Not Actionable Without External Setup
+## Improvements
 
-- **`guardrails.py` SL-distance guardrail** — `current_price` is still `None` because no MCP quote tool is wired; the check is silently skipped
-- **`app_selector.py`** — `Quartz` module has no type stubs (macOS-specific, expected mypy warning)
+- None remaining
 
 ## Completed Tasks
 
-- **UI Enhancements**:
-  - Unified expand/collapse interface using arrow symbols (▶/▼) across all collapsible elements
-  - Enhanced history table with expandable rows showing detailed information (screenshots, assessments, trade details, guardrail status, MCP results)
-  - Improved history sorting to display newest entries first (ordered by timestamp) — fixed `prepend` → `append` in app.js
-  - Fixed static file path references (removed incorrect "/static/" prefix)
-  - Standardized Ollama response expand/collapse button to use arrow symbols
-  - Fixed indentation issues in storage.py
-  - Added `/screenshots` static mount in api.py for screenshot preview
+### UI Component System Unification (Visual Fixes)
 
-- **Error Handling Improvements**:
-  - Added empty response detection in Ollama client to prevent JSON parse errors
-  - Added warning when MCP server connects but returns no tools
-  - Wrapped Ollama API calls in scheduler with try/catch to prevent cycle crashes
-  - Enhanced MCP client logging to warn when server returns no tools
+1. **Button hierarchy** — `btn-primary` (filled accent) is now the only filled action button. `btn-danger` changed to outlined style (transparent bg, red border/text). Added `btn-ghost` class for secondary actions like Refresh. Start Cycle = primary, Stop = outlined danger, Refresh = ghost.
 
-- **Code Quality**:
-  - Removed duplicate logger initialization in mcp_client.py
+2. **Unified badge system** — Replaced `.status-pill`, `.prereq-pill`, `.health-pill` with single `.badge` class. All status indicators now share the same pill shape, padding, and dot prefix via `::before` pseudo-element. Added `.badge.checking` variant with spinner animation for pending states. Removed redundant `.status-dot` element from header.
+
+3. **Form control standardization** — Dropdown, number input, and checkbox toggle now share consistent height (40px), border (1px solid var(--border)), border-radius (8px), and padding (8px 12px). Toggle label gets border and padding to match sibling inputs.
+
+4. **Tightened empty states** — `.ollama-empty` class reduces padding and removes min-height for the "No response yet" state, keeping density consistent with the Scheduler card above it.
+
+5. **Red rationing** — With Stop button now outlined, red is reserved purely for connection failure states (disconnected badges), restoring its urgency signal.

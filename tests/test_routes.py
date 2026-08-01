@@ -103,6 +103,16 @@ class TestApproveDenyEndpoints:
         assert response.json()["ok"] is False
 
 
+class TestPrerequisitesEndpoint:
+    def test_prerequisites_returns_ok(self, client):
+        response = client.get("/api/health/prerequisites")
+        assert response.status_code == 200
+        data = response.json()
+        assert "ok" in data
+        assert "ctrader" in data
+        assert "mcp" in data
+
+
 class TestIndexRoute:
     def test_index_returns_html(self, client):
         response = client.get("/")

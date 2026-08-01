@@ -3,10 +3,10 @@ allowed to place/modify/cancel real trades — keep it small and well-tested.
 
 Uses AsyncExitStack for async lifecycle management, dynamic tool discovery
 via list_tools(), and a TOOL_NAMES mapping for logical-to-actual tool name
-resolution.
+resolution with automatic fallback matching.
 
 Author: Inventions4All - github:TWeb79
-Version: 1.0.0  (deployment: 2026-07-31)
+Version: 1.0.0  (deployment: 2026-08-01)
 """
 
 from __future__ import annotations
@@ -29,6 +29,54 @@ TOOL_NAMES = {
     "close_position": "close_position",
     "modify_position": "modify_position",
 }
+
+_TOOL_ALIASES = {
+    "get_positions": ["get_positions", "list_positions", "positions", "GetPositions"],
+    "open_position": ["open_position", "create_position", "OpenPosition", "PlaceOrder"],
+    "close_position": ["close_position", "ClosePosition", "CloseTrade"],
+    "modify_position": ["modify_position", "modify_sl", "ModifyPosition", "ModifyTrade"],
+}
+
+
+def _find_tool_name(logical_name: str, available_tools: dict[str, Any]) -> str | None:
+    """Resolve a logical tool name to the actual server tool name.
+
+    Tries, in order:
+    1. Exact match in TOOL_NAMES
+    2. Exact match in available_tools
+    3. Case-insensitive match
+    4. Partial/substring match
+    5. Description keyword match
+    """
+    if logical_name in available_tools:
+        return logical_name
+
+    candidates = _TOOL_ALIASES.get(logical_name, [logical_name])
+    available_lower = {k.lower(): k for k in available_tools}
+
+    for candidate in candidates:
+        if candidate in available_tools:
+            return candidate
+        if candidate.lower() in available_lower:
+            return available_lower[candidate.lower()]
+
+    for avail_name in available_tools:
+        avail_lower = avail_name.lower()
+        for candidate in candidates:
+            candidate_lower = candidate.lower()
+            if (avail_lower.startswith(candidate_lower) or
+                avail_lower.endswith(candidate_lower) or
+                candidate_lower.startswith(avail_lower) or
+                candidate_lower.endswith(avail_lower)):
+                return avail_name
+
+    for avail_name, tool in available_tools.items():
+        desc = (tool.description or "").lower()
+        for candidate in candidates:
+            if candidate.lower() in desc:
+                return avail_name
+
+    return None
 
 
 def _extract_text(result: Any) -> str:
@@ -70,9 +118,15 @@ class CTraderMCPClient:
         self._stack = AsyncExitStack()
         self.session: ClientSession | None = None
         self.available_tools: dict[str, Any] = {}
+        self._resolved_tools: dict[str, str] = {}
 
     async def connect(self) -> None:
         """Connect to the cTrader MCP server and discover available tools."""
+        if self.session is not None:
+            try:
+                await self.disconnect()
+            except Exception:
+                pass
         log_event(log, "mcp_connect_start", {"url": self.url})
         read, write = await self._stack.enter_async_context(
             streamable_http_client(self.url),
@@ -84,9 +138,15 @@ class CTraderMCPClient:
 
         tools_result = await self.session.list_tools()
         self.available_tools = {t.name: t for t in tools_result.tools}
+        self._resolved_tools: dict[str, str] = {}
+        for logical_name in TOOL_NAMES:
+            resolved = _find_tool_name(logical_name, self.available_tools)
+            if resolved:
+                self._resolved_tools[logical_name] = resolved
         log_event(log, "mcp_connect_ok", {
             "url": self.url,
             "tools": list(self.available_tools.keys()),
+            "resolved": self._resolved_tools,
         })
         if not self.available_tools:
             log.warning(
@@ -99,12 +159,21 @@ class CTraderMCPClient:
             for name, tool in self.available_tools.items():
                 desc = (tool.description or "").strip().replace("\n", " ")[:100]
                 log.info("  - %s: %s", name, desc)
+            unresolved = [k for k in TOOL_NAMES if k not in self._resolved_tools]
+            if unresolved:
+                log.warning(
+                    "Could not resolve logical tool names: %s. "
+                    "Available tools: %s. "
+                    "Update TOOL_NAMES or _TOOL_ALIASES to match your server.",
+                    unresolved,
+                    list(self.available_tools.keys()),
+                )
 
     async def call(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """Call a tool on the cTrader MCP server.
 
         Args:
-            tool_name: Logical tool name (mapped via TOOL_NAMES).
+            tool_name: Logical tool name (mapped via TOOL_NAMES / _resolved_tools).
             arguments: Dict of arguments for the tool call.
 
         Returns:
@@ -113,8 +182,10 @@ class CTraderMCPClient:
         Raises:
             RuntimeError: If the tool is not available on the server.
         """
-        log_event(log, "mcp_call", {"tool": tool_name, "arguments": arguments})
-        if tool_name not in self.available_tools:
+        actual_name = self._resolved_tools.get(tool_name)
+        if actual_name is None:
+            actual_name = _find_tool_name(tool_name, self.available_tools)
+        if actual_name is None:
             log_event(log, "mcp_call_error", {
                 "tool": tool_name,
                 "error": "tool not found",
@@ -123,20 +194,31 @@ class CTraderMCPClient:
             raise RuntimeError(
                 f"Tool '{tool_name}' not found. "
                 f"Available: {list(self.available_tools.keys())}. "
-                "Update TOOL_NAMES to match your server.",
+                "Update TOOL_NAMES or _TOOL_ALIASES to match your server."
             )
-        result = await self.session.call_tool(tool_name, arguments)
-        log_event(log, "mcp_response", {"tool": tool_name, "status": "ok"})
+        log_event(log, "mcp_call", {"tool": actual_name, "arguments": arguments})
+        if actual_name not in self.available_tools:
+            log_event(log, "mcp_call_error", {
+                "tool": actual_name,
+                "error": "tool not found",
+                "available": list(self.available_tools.keys()),
+            })
+            raise RuntimeError(
+                f"Tool '{actual_name}' not found. "
+                f"Available: {list(self.available_tools.keys())}."
+            )
+        result = await self.session.call_tool(actual_name, arguments)
+        log_event(log, "mcp_response", {"tool": actual_name, "status": "ok"})
         for block in result.content:
             if hasattr(block, "text"):
                 try:
                     return json.loads(block.text)
                 except (json.JSONDecodeError, TypeError):
                     raise RuntimeError(
-                        f"Tool '{tool_name}' returned non-JSON text: {block.text!r}"
+                        f"Tool '{actual_name}' returned non-JSON text: {block.text!r}"
                     )
         raise RuntimeError(
-            f"Tool '{tool_name}' returned no text content in result blocks"
+            f"Tool '{actual_name}' returned no text content in result blocks"
         )
 
     async def get_open_positions(self) -> list[dict[str, Any]]:
@@ -177,9 +259,23 @@ class CTraderMCPClient:
         """Close the MCP connection."""
         await self._stack.aclose()
 
+    async def verify(self) -> dict[str, Any]:
+        """Probe the MCP endpoint and return diagnostic info without fully connecting."""
+        import urllib.request
+        result = {"url": self.url, "reachable": False, "status": None, "tools": []}
+        try:
+            req = urllib.request.Request(self.url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                result["reachable"] = True
+                result["status"] = resp.status
+        except Exception as e:
+            result["error"] = str(e)
+        return result
+
     async def disconnect(self) -> None:
         """Disconnect and reset state for reconnection."""
         await self.close()
         self._stack = AsyncExitStack()
         self.session = None
         self.available_tools = {}
+        self._resolved_tools = {}

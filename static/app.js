@@ -7,27 +7,91 @@ const historyBody = document.querySelector("#history-table tbody");
 const startBtn = document.getElementById("start-cycle-btn");
 const stopBtn = document.getElementById("stop-cycle-btn");
 const statusEl = document.getElementById("scheduler-status");
+const countdownEl = document.getElementById("next-cycle-countdown");
 const logEl = document.getElementById("log");
 const ollamaResponseEl = document.getElementById("ollama-response");
 
 const modal = document.getElementById("approval-modal");
 const assessmentEl = document.getElementById("approval-assessment");
 const detailsEl = document.getElementById("approval-details");
-const countdownEl = document.getElementById("countdown-value");
+const approvalCountdownEl = document.getElementById("countdown-value");
 const approveBtn = document.getElementById("approve-btn");
 const denyBtn = document.getElementById("deny-btn");
+
+const wsStatusEl = document.getElementById("ws-status");
+const mcpStatusEl = document.getElementById("mcp-status");
+const kpiNextCycle = document.getElementById("kpi-next-cycle");
+const kpiConfidence = document.getElementById("kpi-confidence");
+const kpiPnl = document.getElementById("kpi-pnl");
+const kpiPositions = document.getElementById("kpi-positions");
+const kpiTrend = document.getElementById("kpi-trend");
+const kpiCountdown = document.getElementById("kpi-countdown");
 
 let countdownTimer = null;
 let currentCycleId = null;
 let lastCapturePath = null;
 let lastCaptureTime = 0;
 let expandedResponse = false;
+let countdownSeconds = 0;
+let effectiveIntervalSeconds = 0;
+let lastHistoryData = "";
+let prerequisitesOk = false;
+let currentProvider = "ollama";
+
+async function fetchPrerequisites() {
+  try {
+    const res = await fetch("/api/health/prerequisites");
+    const data = await res.json();
+    prerequisitesOk = data.ok || false;
+    updatePrerequisitesUI(data);
+    return data;
+  } catch (e) {
+    console.error("Failed to fetch prerequisites:", e);
+    prerequisitesOk = false;
+    return { ok: false, ctrader: { running: false }, mcp: { reachable: false } };
+  }
+}
+
+function updatePrerequisitesUI(data) {
+  const ctraderEl = document.getElementById("prereq-ctrader");
+  const mcpEl = document.getElementById("prereq-mcp");
+  if (ctraderEl) {
+    ctraderEl.textContent = data.ctrader?.running ? "cTrader: running" : "cTrader: not running";
+    ctraderEl.className = "badge " + (data.ctrader?.running ? "connected" : "disconnected");
+  }
+  if (mcpEl) {
+    mcpEl.textContent = data.mcp?.reachable ? "MCP: reachable" : "MCP: unreachable";
+    mcpEl.className = "badge " + (data.mcp?.reachable ? "connected" : "disconnected");
+  }
+}
 
 function log(msg) {
   const ts = new Date().toLocaleTimeString();
   logEl.textContent += `[${ts}] ${msg}\n`;
   logEl.scrollTop = logEl.scrollHeight;
 }
+
+function escapeHtml(str) {
+  if (typeof str !== "string") return str;
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// Sidebar navigation
+document.querySelectorAll(".nav-item").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const section = btn.dataset.section;
+    document.querySelectorAll(".nav-item").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+    const target = document.getElementById(`section-${section}`);
+    if (target) target.classList.add("active");
+  });
+});
 
 function showOllamaResponse(parsed) {
   expandedResponse = false;
@@ -42,9 +106,9 @@ function showOllamaResponse(parsed) {
   const directionClass = direction === "up" ? "up" : direction === "down" ? "down" : "sideways";
 
   let html = `<div class="ollama-summary">`;
-if (lastCapturePath) {
-  html += `<img class="ollama-thumbnail" src="/${lastCapturePath}" alt="Screenshot" />`;
-}
+  if (lastCapturePath) {
+    html += `<img class="ollama-thumbnail" src="/${lastCapturePath}" alt="Screenshot" />`;
+  }
   html += `<span class="ollama-direction ${directionClass}">${direction}</span>`;
   html += `<span class="ollama-confidence">Confidence: ${confidence}</span>`;
   html += `<span class="ollama-time">${timeStr}</span>`;
@@ -112,10 +176,54 @@ async function updateIntervalHint() {
       intervalMinHint.dataset.minMinutes = minMin;
       const avgMin = (data.avg_ollama_time_s / 60).toFixed(1);
       intervalMinHint.textContent = `Min: ${minMin} min (Ollama avg ${avgMin}min + 30s)`;
+      effectiveIntervalSeconds = data.effective_interval_s;
     }
   } catch (e) {
     console.error("Failed to fetch timing info:", e);
   }
+}
+
+function startCountdown(seconds) {
+  clearInterval(countdownTimer);
+  countdownSeconds = seconds;
+  updateCountdownDisplay();
+
+  countdownTimer = setInterval(() => {
+    countdownSeconds -= 1;
+    if (countdownSeconds <= 0) {
+      countdownSeconds = 0;
+      updateCountdownDisplay();
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    } else {
+      updateCountdownDisplay();
+    }
+  }, 1000);
+}
+
+function updateCountdownDisplay() {
+  if (countdownSeconds <= 0) {
+    countdownEl.textContent = "";
+    countdownEl.classList.add("hidden");
+    if (kpiCountdown) kpiCountdown.textContent = "Waiting...";
+    if (kpiNextCycle) kpiNextCycle.textContent = "--:--";
+    return;
+  }
+  countdownEl.classList.remove("hidden");
+  const mins = Math.floor(countdownSeconds / 60);
+  const secs = countdownSeconds % 60;
+  const text = `Next in ${mins}:${secs.toString().padStart(2, "0")}`;
+  countdownEl.textContent = text;
+  if (kpiCountdown) kpiCountdown.textContent = text;
+  if (kpiNextCycle) kpiNextCycle.textContent = `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function stopCountdown() {
+  clearInterval(countdownTimer);
+  countdownTimer = null;
+  countdownSeconds = 0;
+  countdownEl.textContent = "";
+  countdownEl.classList.add("hidden");
 }
 
 autoApproveToggle.onchange = () => {
@@ -123,11 +231,21 @@ autoApproveToggle.onchange = () => {
 };
 
 startBtn.onclick = async () => {
+  log("Checking prerequisites...");
+  const prereq = await fetchPrerequisites();
+  if (!prereq.ok) {
+    const reasons = [];
+    if (!prereq.ctrader?.running) reasons.push("cTrader is not running");
+    if (!prereq.mcp?.reachable) reasons.push("MCP server is not reachable");
+    const msg = reasons.join("; ") + " — cannot start cycle.";
+    log(msg);
+    alert(msg);
+    return;
+  }
   log("Starting manual cycle...");
   statusEl.textContent = "Running";
-  statusEl.style.color = "var(--green)";
-  const setupBody = document.getElementById("setup-body");
-  if (setupBody) setupBody.classList.add("collapsed");
+  statusEl.classList.add("running");
+  startCountdown(effectiveIntervalSeconds || 300);
   const res = await fetch("/api/scheduler/start", { method: "POST" });
   const data = await res.json();
   if (!data.ok) log(`Start failed: ${data.message}`);
@@ -136,18 +254,10 @@ startBtn.onclick = async () => {
 stopBtn.onclick = async () => {
   log("Stopping scheduler...");
   statusEl.textContent = "Stopped";
-  statusEl.style.color = "var(--red)";
+  statusEl.classList.remove("running");
+  stopCountdown();
   await fetch("/api/scheduler/stop", { method: "POST" });
 };
-
-const setupToggle = document.getElementById("setup-toggle");
-const setupBody = document.getElementById("setup-body");
-if (setupToggle && setupBody) {
-  setupToggle.onclick = () => {
-    setupBody.classList.toggle("collapsed");
-    setupToggle.textContent = setupBody.classList.contains("collapsed") ? "▶" : "▼";
-  };
-}
 
 function showApproval(cycleId, decision, timeoutS) {
   currentCycleId = cycleId;
@@ -156,11 +266,11 @@ function showApproval(cycleId, decision, timeoutS) {
   modal.classList.remove("hidden");
 
   let remaining = timeoutS;
-  countdownEl.textContent = remaining;
+  approvalCountdownEl.textContent = remaining;
   clearInterval(countdownTimer);
   countdownTimer = setInterval(() => {
     remaining -= 1;
-    countdownEl.textContent = remaining;
+    approvalCountdownEl.textContent = remaining;
     if (remaining <= 0) {
       clearInterval(countdownTimer);
       hideApproval();
@@ -198,7 +308,7 @@ function addHistoryRow(row) {
   let actionHtml = row.action ?? "-";
   if (row.new_trade) {
     const t = row.new_trade;
-    actionHtml = `${t.direction ?? ""} ${t.sl ?? ""}/${t.tp ?? ""}`.trim() || "-";
+    actionHtml = `${t.direction ?? ""} SL=${t.sl ?? ""} TP=${t.tp ?? ""}`.trim() || "-";
   }
 
   const statusClass = row.status ? `history-badge ${row.status}` : "";
@@ -224,14 +334,15 @@ function addHistoryRow(row) {
   detailsTr.innerHTML = `
     <td colspan="6">
       <div class="history-details-inner">
-        ${screenshotSrc ? `<img class="history-thumb" src="${screenshotSrc}" alt="Screenshot" />` : ""}
         <div class="history-meta">
-          ${assessment ? `<p><span class="label">Assessment</span><br/>${row.assessment}</p>` : ""}
+          <p><span class="label">Date</span>${ts}</p>
+          ${assessment ? `<p><span class="label">Assessment</span><br/>${escapeHtml(row.assessment)}</p>` : ""}
           ${newTrade ? `<p><span class="label">Trade</span><br/>${row.new_trade.direction} SL=${row.new_trade.sl} TP=${row.new_trade.tp}</p>` : ""}
-          ${guardrail ? `<p><span class="label">Guardrail</span><br/>${row.guardrail_status}${row.guardrail_reason ? ` — ${row.guardrail_reason}` : ""}</p>` : ""}
+          ${guardrail ? `<p><span class="label">Guardrail</span><br/>${row.guardrail_status}${row.guardrail_reason ? ` — ${escapeHtml(row.guardrail_reason)}` : ""}</p>` : ""}
           ${mcpResult ? `<p><span class="label">MCP Result</span><br/><pre>${JSON.stringify(row.mcp_result, null, 2)}</pre></p>` : ""}
           <p><span class="label">Cycle ID</span> #${cycleId}</p>
         </div>
+        ${screenshotSrc ? `<img class="history-thumb" src="${screenshotSrc}" alt="Screenshot" />` : ""}
       </div>
     </td>
   `;
@@ -259,6 +370,11 @@ function addHistoryRow(row) {
 async function loadHistory() {
   const res = await fetch("/api/history");
   const rows = await res.json();
+  const dataKey = JSON.stringify(rows);
+  if (dataKey === lastHistoryData) {
+    return;
+  }
+  lastHistoryData = dataKey;
   historyBody.innerHTML = "";
   rows.forEach(r => {
     let response = {};
@@ -285,23 +401,46 @@ async function loadHistory() {
 const ws = new WebSocket(`ws://${location.host}/ws`);
 let reconnectTimer = null;
 
+function updateWsStatus(status, className) {
+  if (!wsStatusEl) return;
+  wsStatusEl.textContent = status;
+  wsStatusEl.className = "badge " + (className || "");
+}
+
+function updateMcpStatus(connected) {
+  if (!mcpStatusEl) return;
+  if (connected) {
+    mcpStatusEl.textContent = "MCP: connected";
+    mcpStatusEl.className = "badge connected";
+  } else {
+    mcpStatusEl.textContent = "MCP: offline";
+    mcpStatusEl.className = "badge disconnected";
+  }
+}
+
 function connectWs() {
+  updateWsStatus("WS: connecting...", "");
   ws.onopen = () => {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+    updateWsStatus("WS: connected", "connected");
   };
-ws.onmessage = (evt) => {
+  ws.onmessage = (evt) => {
     const { type, payload } = JSON.parse(evt.data);
     if (type === "cycle_start") {
       ollamaResponseEl.textContent = "Analyzing...";
+      startCountdown(effectiveIntervalSeconds || 300);
+      statusEl.textContent = "Running";
+      statusEl.classList.add("running");
     }
     if (type === "approval_requested") {
       showApproval(payload.cycle_id, payload.decision, payload.timeout_s);
     }
     if (["executed", "denied", "auto_denied_timeout", "guardrail_rejected", "no_action"].includes(type)) {
       loadHistory();
+      startCountdown(effectiveIntervalSeconds || 300);
     }
     if (type === "auto_denied_timeout") {
       hideApproval();
@@ -317,6 +456,7 @@ ws.onmessage = (evt) => {
         ollamaResponseEl.textContent = String(payload.response);
       }
       log("Ollama response received and displayed");
+      loadHistory();
     }
     if (type === "capture") {
       const now = Date.now();
@@ -326,11 +466,19 @@ ws.onmessage = (evt) => {
         lastCaptureTime = now;
       }
     }
+    if (type === "mcp_connect_ok") {
+      updateMcpStatus(true);
+    }
+    if (type === "mcp_connect_retry" || type === "mcp_call_error") {
+      updateMcpStatus(false);
+    }
   };
   ws.onclose = () => {
+    updateWsStatus("WS: disconnected — reconnecting...", "disconnected");
     reconnectTimer = setTimeout(connectWs, 3000);
   };
   ws.onerror = () => {
+    updateWsStatus("WS: error — reconnecting...", "disconnected");
     ws.close();
   };
 }
@@ -355,3 +503,69 @@ document.getElementById("ollama-screenshot-close").onclick = hideOllamaOverlay;
 loadWindows();
 loadHistory();
 updateIntervalHint();
+fetchPrerequisites();
+setInterval(fetchPrerequisites, 30000);
+
+const providerSelect = document.getElementById("setting-provider");
+const nvidiaSettings = document.getElementById("nvidia-settings");
+if (providerSelect) {
+  providerSelect.onchange = () => {
+    currentProvider = providerSelect.value;
+    if (nvidiaSettings) {
+      nvidiaSettings.classList.toggle("hidden", currentProvider !== "nvidia");
+    }
+  };
+}
+
+// Settings page handlers
+const saveSettingsBtn = document.getElementById("save-settings-btn");
+if (saveSettingsBtn) {
+  saveSettingsBtn.onclick = async () => {
+    const patches = {};
+
+    const symbol = document.getElementById("setting-symbol")?.value;
+    const pip = document.getElementById("setting-pip")?.value;
+    if (symbol || pip) {
+      patches.trading = {};
+      if (symbol) patches.trading.default_symbol = symbol;
+      if (pip) patches.trading.pip_size = parseFloat(pip);
+    }
+
+    const maxLoss = document.getElementById("setting-max-loss")?.value;
+    const maxPositions = document.getElementById("setting-max-positions")?.value;
+    const minSl = document.getElementById("setting-min-sl")?.value;
+    if (maxLoss || maxPositions || minSl) {
+      patches.risk_limits = {};
+      if (maxLoss) patches.risk_limits.max_daily_loss_pct = parseFloat(maxLoss);
+      if (maxPositions) patches.risk_limits.max_concurrent_positions = parseInt(maxPositions, 10);
+      if (minSl) patches.risk_limits.min_sl_distance_pips = parseInt(minSl, 10);
+    }
+
+    const provider = document.getElementById("setting-provider")?.value;
+    if (provider) {
+      patches.provider = provider;
+      currentProvider = provider;
+    }
+
+    const nvidiaModel = document.getElementById("setting-nvidia-model")?.value;
+    if (nvidiaModel) {
+      patches.nvidia = patches.nvidia || {};
+      patches.nvidia.model = nvidiaModel;
+    }
+
+    const nvidiaApiKey = document.getElementById("setting-nvidia-api-key")?.value;
+    if (nvidiaApiKey) {
+      patches.nvidia = patches.nvidia || {};
+      patches.nvidia.api_key = nvidiaApiKey;
+    }
+
+    await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patches),
+    });
+
+    log("Configuration saved");
+    alert("Configuration saved successfully.");
+  };
+}

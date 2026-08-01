@@ -1,6 +1,10 @@
 """Hard limits enforced regardless of what the model says, and regardless
 of auto_approve. These are the last line of defense before anything reaches
-the MCP client."""
+the MCP client.
+
+Author: Inventions4All - github:TWeb79
+Version: 1.0.0  (deployment: 2026-08-01)
+"""
 
 from __future__ import annotations
 from typing import Any, Optional
@@ -53,6 +57,15 @@ def check(
                     f"SL too close: {sl_distance_pips:.1f} pips "
                     f"(min {limits['min_sl_distance_pips']})"
                 )
+        else:
+            log_event(log, "guardrail_skip_sl_distance", {
+                "reason": "current_price is None — no MCP quote tool wired; "
+                          "SL distance check skipped",
+            })
+            log.warning(
+                "SL distance guardrail skipped: current_price is None. "
+                "Wire an MCP quote tool to enable this check."
+            )
 
         direction = new_trade["direction"]
         sl, tp = new_trade["sl"], new_trade["tp"]
@@ -63,5 +76,5 @@ def check(
             log_event(log, "guardrail_reject", {"reason": "sell order: SL must be above TP"})
             raise GuardrailRejection("sell order: SL must be above TP")
 
-    # max_position_size is enforced at the MCP call site where lot size is set —
-    # see mcp_client.py TODO.
+    # max_position_size is enforced in scheduler.py:_execute() where volume is set —
+    # see scheduler.py:_execute().

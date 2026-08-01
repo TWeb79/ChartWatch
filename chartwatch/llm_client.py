@@ -1,0 +1,71 @@
+"""Unified LLM client that dispatches to either Ollama or NVIDIA
+based on the configured provider in config.yaml.
+
+Author: Inventions4All - github:TWeb79
+Version: 1.0.0  (deployment: 2026-08-01)
+"""
+
+from __future__ import annotations
+from typing import Any, Optional
+
+from .logger import get_logger, log_event
+
+log = get_logger("chartwatch.llm")
+
+
+def analyze(
+    screenshot_path: str,
+    position_context: Optional[dict[str, Any]],
+    cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """Analyze a screenshot using the configured LLM provider.
+
+    Dispatches to either Ollama or NVIDIA based on ``cfg["provider"]``.
+
+    Args:
+        screenshot_path: Path to the screenshot image file.
+        position_context: Current open position details, or None.
+        cfg: Application configuration dict.
+
+    Returns:
+        Parsed decision dict from the model.
+
+    Raises:
+        ValueError: If the provider is unknown or the model returns invalid data.
+    """
+    provider = cfg.get("provider", "ollama")
+    model = cfg.get("llm_model", cfg.get("ollama", {}).get("model", ""))
+    instruction_file = cfg.get("instruction_file", "")
+
+    if provider == "ollama":
+        from . import ollama_client
+        ollama_cfg = cfg.get("ollama", {})
+        log_event(log, "llm_dispatch", {"provider": "ollama", "model": model})
+        return ollama_client.analyze(
+            screenshot_path=screenshot_path,
+            position_context=position_context,
+            model=ollama_cfg.get("model", model),
+            host=ollama_cfg.get("host", "http://localhost:11434"),
+            instruction_file=ollama_cfg.get("instruction_file", instruction_file),
+        )
+
+    if provider == "nvidia":
+        from . import nvidia_client
+        nvidia_cfg = cfg.get("nvidia", {})
+        log_event(log, "llm_dispatch", {"provider": "nvidia", "model": model})
+        return nvidia_client.analyze(
+            screenshot_path=screenshot_path,
+            position_context=position_context,
+            model=nvidia_cfg.get("model", model),
+            api_key=nvidia_cfg.get("api_key", ""),
+            base_url=nvidia_cfg.get("base_url", "https://integrate.api.nvidia.com/v1"),
+            temperature=nvidia_cfg.get("temperature", 1),
+            top_p=nvidia_cfg.get("top_p", 0.95),
+            max_tokens=nvidia_cfg.get("max_tokens", 8192),
+            instruction_file=nvidia_cfg.get("instruction_file", instruction_file),
+        )
+
+    raise ValueError(
+        f"Unknown LLM provider: {provider!r}. "
+        "Supported providers: 'ollama', 'nvidia'."
+    )

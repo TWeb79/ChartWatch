@@ -3,12 +3,12 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config as cfg_module
-from . import app_selector, storage
+from . import app_selector, ctrader_check, storage
 from .logger import get_logger, log_event
 from .scheduler import Scheduler
 
@@ -114,6 +114,15 @@ def set_auto_approve(enabled: bool):
     return cfg
 
 
+@app.post("/api/config")
+async def config_update(request: Request):
+    body = await request.json()
+    log_event(log, "api_config_update", {"body": body})
+    cfg = cfg_module.update(body)
+    _state["scheduler"].cfg = cfg
+    return cfg
+
+
 @app.post("/api/scheduler/start")
 async def scheduler_start():
     log_event(log, "api_scheduler_start", {})
@@ -145,8 +154,59 @@ def scheduler_timing():
     }
 
 
+@app.get("/api/mcp/verify")
+async def mcp_verify():
+    scheduler = _state.get("scheduler")
+    if not scheduler or not scheduler.mcp:
+        return {"error": "MCP client not initialized"}
+    result = await scheduler.mcp.verify()
+    return result
+
+
+@app.get("/api/health")
+async def health_check():
+    scheduler = _state.get("scheduler")
+    mcp_ok = False
+    ollama_ok = False
+    mcp_error = None
+    ollama_error = None
+
+    if scheduler and scheduler.mcp:
+        try:
+            mcp_result = await scheduler.mcp.verify()
+            mcp_ok = mcp_result.get("reachable", False)
+            mcp_error = mcp_result.get("error")
+        except Exception as e:
+            mcp_error = str(e)
+
+    try:
+        import urllib.request
+        req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            ollama_ok = resp.status == 200
+    except Exception as e:
+        ollama_error = str(e)
+
+    status = "ok" if (mcp_ok and ollama_ok) else "degraded"
+    return {
+        "status": status,
+        "mcp": {"ok": mcp_ok, "error": mcp_error},
+        "ollama": {"ok": ollama_ok, "error": ollama_error},
+    }
+
+
+@app.get("/api/health/prerequisites")
+async def prerequisites_check():
+    scheduler = _state.get("scheduler")
+    if not scheduler:
+        return {"ok": False, "error": "scheduler not initialized"}
+    cfg = scheduler.cfg
+    return ctrader_check.check_prerequisites(cfg)
+
+
 @app.get("/api/history")
 def get_history(limit: int = 50):
+    limit = max(1, min(limit, 500))
     log_event(log, "api_history", {"limit": limit})
     return _state["store"].recent(limit)
 
@@ -167,6 +227,12 @@ def deny(cycle_id: int):
 
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
+    allowed_origins = {"http://localhost:8056", "http://127.0.0.1:8056"}
+    origin = websocket.headers.get("origin", "")
+    if origin not in allowed_origins:
+        log_event(log, "ws_rejected", {"origin": origin})
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     log_event(log, "ws_client_connected", {})
     async with _ws_lock:

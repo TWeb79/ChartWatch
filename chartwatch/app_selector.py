@@ -1,11 +1,15 @@
 """Enumerates on-screen windows via Quartz so the web UI can offer a picker.
 Requires Screen Recording permission for the terminal/Python process
 (System Settings -> Privacy & Security -> Screen Recording) — without it,
-window titles come back empty."""
+window titles come back empty.
+
+Author: Inventions4All - github:TWeb79
+Version: 1.0.0  (deployment: 2026-08-01)
+"""
 
 from __future__ import annotations
 from typing import Optional
-import Quartz
+import Quartz  # type: ignore
 
 _SYSTEM_WINDOW_OWNERS = frozenset({
     "Window Server",
@@ -32,12 +36,3 @@ def list_windows() -> list[dict]:
         if owner and owner not in _SYSTEM_WINDOW_OWNERS:
             windows.append({"id": wid, "owner": owner, "title": title})
     return windows
-
-
-def get_window_bounds(window_id: int) -> Optional[dict]:
-    options = Quartz.kCGWindowListOptionIncludingWindow
-    info = Quartz.CGWindowListCopyWindowInfo(options, window_id)
-    if not info:
-        return None
-    bounds = info[0].get("kCGWindowBounds")
-    return bounds  # {'X':.., 'Y':.., 'Width':.., 'Height':..}

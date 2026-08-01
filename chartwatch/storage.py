@@ -7,6 +7,7 @@ import sqlite3
 import json
 import time
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -85,7 +86,8 @@ class Storage:
     def daily_pnl_pct(self, account_value: float = 0.0) -> float:
         """Compute today's realized PnL as a percentage of account value.
         Returns 0.0 if no closed trades exist or if account_value is zero."""
-        today_start = time.mktime(time.localtime()) // 86400 * 86400
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         rows = self._execute(
             "SELECT action_status, mcp_result FROM cycles WHERE ts >= ?",
             (today_start,),
