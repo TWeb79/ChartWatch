@@ -113,3 +113,21 @@ class TestModelResponseRendering:
             "String(payload.response) renders '[object Object]' for non-string "
             "payloads; use JSON.stringify instead"
         )
+
+
+class TestLlmIntegration:
+    def test_log_message_uses_dynamic_provider(self):
+        """Regression: log message must not hardcode 'Ollama' when provider is NVIDIA."""
+        with open(JS_PATH, encoding="utf-8") as f:
+            content = f.read()
+        assert '"Ollama response received and displayed"' not in content, (
+            "Log message hardcodes 'Ollama' — use currentProvider variable instead"
+        )
+
+    def test_fetchLlmHealth_has_retry(self):
+        """Regression: fetchLlmHealth must retry before declaring LLM unreachable."""
+        with open(JS_PATH, encoding="utf-8") as f:
+            content = f.read()
+        assert "res2" in content or "setTimeout(resolve" in content, (
+            "fetchLlmHealth must have a retry mechanism for transient failures"
+        )

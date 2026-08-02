@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import app_selector, ctrader_check, storage
 from . import config as cfg_module
+from .llm_utils import filter_vision_models
 from .logger import get_logger, log_event
 from .scheduler import Scheduler
 
@@ -29,6 +31,14 @@ app = FastAPI()
 _state: dict[str, Any] = {}
 _ws_clients: list[WebSocket] = []
 _ws_lock = asyncio.Lock()
+
+# Cache for filtered LLM models (populated at startup by test_models task)
+_filtered_llm_models: dict[str, Any] = {}
+
+# Rate-limiting: prevent rapid re-calling of /api/llm/models/test
+# (which triggers a provider API call). Min 30 seconds between manual tests.
+_last_model_test_time: float = 0.0
+MODEL_TEST_MIN_INTERVAL_S: float = 30.0
 
 
 async def _broadcast(event_type: str, payload: dict):
@@ -46,7 +56,110 @@ async def _broadcast(event_type: str, payload: dict):
                 try:
                     _ws_clients.remove(ws)
                 except ValueError:
-                    pass
+                     pass
+
+
+async def _test_and_cache_models() -> dict[str, Any]:
+    """Fetch all models from the configured LLM provider, test each for
+    availability + vision capability, and cache the filtered result.
+
+    This runs once at application startup. If the provider is unreachable,
+    the cache is left empty and the endpoint will return an error.
+
+    If a cached JSON file (``<provider>_models.json``) exists in the project
+    root, it is loaded instead of re-fetching from the provider. If no cache
+    file exists, the test runs and writes the filtered results to the file
+    for subsequent startups.
+
+    While the test is running, a WebSocket ``models_testing`` event is broadcast
+    so the frontend can show a yellow "Analyzing models..." status.
+    """
+    global _filtered_llm_models
+
+    cfg = cfg_module.load()
+    provider = cfg.get("provider", "ollama")
+    llm_cfg = cfg.get(provider, {})
+    selected_model = cfg.get("llm_model", llm_cfg.get("model", ""))
+
+    # Check for existing cache file
+    project_root = Path(__file__).resolve().parent.parent
+    cache_file = project_root / f"{provider}_models.json"
+
+    if cache_file.exists():
+        try:
+            with open(cache_file, encoding="utf-8") as f:
+                cached = json.loads(f.read())
+            _filtered_llm_models = cached
+            _filtered_llm_models["selected_model"] = selected_model
+            log_event(log, "llm_models_loaded_from_cache", {
+                "provider": provider,
+                "cached_count": len(cached.get("models", [])),
+            })
+            await _broadcast("models_ready", {"provider": provider, "model_count": len(cached.get("models", []))})
+            return _filtered_llm_models
+        except Exception as e:
+            log_event(log, "llm_models_cache_load_error", {"error": str(e)})
+
+    # No cache file — run the test (broadcast status to frontend)
+    await _broadcast("models_testing", {"provider": provider, "status": "analyzing models"})
+
+    try:
+        if provider == "ollama":
+            host = llm_cfg.get("host", "http://localhost:11434")
+            url = host.rstrip("/") + "/api/tags"
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            all_models = [m.get("name", m.get("model", "")) for m in data.get("models", [])]
+        elif provider == "nvidia":
+            base_url = llm_cfg.get("base_url", "https://integrate.api.nvidia.com/v1")
+            api_key = llm_cfg.get("api_key", "")
+            url = base_url.rstrip("/") + "/models"
+            req = urllib.request.Request(url, method="GET")
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            all_models = [m.get("id", "") for m in data.get("data", [])]
+        else:
+            all_models = []
+
+        filtered = await filter_vision_models(all_models, provider)
+        _filtered_llm_models = {
+            "provider": provider,
+            "selected_model": selected_model,
+            "models": filtered,
+            "total_fetched": len(all_models),
+            "total_filtered": len(filtered),
+        }
+
+        # Persist to cache file for next startup
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(_filtered_llm_models, f, indent=2)
+            log_event(log, "llm_models_cache_written", {
+                "provider": provider,
+                "file": str(cache_file),
+                "model_count": len(filtered),
+            })
+        except Exception as e:
+            log_event(log, "llm_models_cache_write_error", {"error": str(e)})
+
+        log_event(log, "llm_models_cached", {
+            "provider": provider,
+            "total_fetched": len(all_models),
+            "total_filtered": len(filtered),
+        })
+        await _broadcast("models_ready", {"provider": provider, "model_count": len(filtered)})
+    except Exception as e:
+        log_event(log, "llm_models_cache_error", {"provider": provider, "error": str(e)})
+        _filtered_llm_models = {
+            "provider": provider,
+            "selected_model": selected_model,
+            "models": [],
+            "error": str(e),
+        }
+        await _broadcast("models_error", {"provider": provider, "error": str(e)})
 
 
 @app.on_event("startup")
@@ -58,6 +171,8 @@ async def startup():
     _state["store"] = store
     _state["scheduler"] = scheduler
     _state["scheduler_task"] = asyncio.create_task(scheduler.start())
+    # Run model availability + vision test once at startup (non-blocking)
+    asyncio.create_task(_test_and_cache_models())
 
 
 @app.on_event("shutdown")
@@ -313,45 +428,54 @@ async def llm_health_check():
 async def llm_models():
     """List available models for the configured LLM provider.
 
+    Returns cached results from the startup model test if available,
+    otherwise fetches fresh from the provider and applies vision/free filtering.
+
     Returns:
-        Dict with ``provider``, ``selected_model``, ``selected_llm_model``,
-        and ``models`` (list of model strings sorted alphabetically).
+        Dict with ``provider``, ``selected_model``, and ``models``
+        (list of filtered model strings sorted alphabetically).
     """
+    if _filtered_llm_models and "models" in _filtered_llm_models:
+        current_cfg = cfg_module.load()
+        current_provider = current_cfg.get("provider", "ollama")
+        current_selected = current_cfg.get("llm_model", current_cfg.get(current_provider, {}).get("model", ""))
+        # Update selected_model in case it changed since startup
+        result = dict(_filtered_llm_models)
+        result["selected_model"] = current_selected
+        return result
+
+    # Fallback: fetch fresh if cache is empty (e.g. test hasn't run yet)
     cfg = cfg_module.load()
     provider = cfg.get("provider", "ollama")
     llm_cfg = cfg.get(provider, {})
     selected_model = cfg.get("llm_model", llm_cfg.get("model", ""))
 
-    if provider == "ollama":
-        host = llm_cfg.get("host", "http://localhost:11434")
-        url = host.rstrip("/") + "/api/tags"
-        try:
+    try:
+        if provider == "ollama":
+            host = llm_cfg.get("host", "http://localhost:11434")
+            url = host.rstrip("/") + "/api/tags"
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            models = sorted(m.get("name", m.get("model", "")) for m in data.get("models", []))
-            return {"provider": provider, "selected_model": selected_model, "models": models}
-        except Exception as e:
-            log_event(log, "llm_models_error", {"provider": "ollama", "error": str(e)})
-            return {"provider": provider, "selected_model": selected_model, "models": [], "error": str(e)}
-
-    if provider == "nvidia":
-        base_url = llm_cfg.get("base_url", "https://integrate.api.nvidia.com/v1")
-        api_key = llm_cfg.get("api_key", "")
-        url = base_url.rstrip("/") + "/models"
-        try:
+            all_models = [m.get("name", m.get("model", "")) for m in data.get("models", [])]
+        elif provider == "nvidia":
+            base_url = llm_cfg.get("base_url", "https://integrate.api.nvidia.com/v1")
+            api_key = llm_cfg.get("api_key", "")
+            url = base_url.rstrip("/") + "/models"
             req = urllib.request.Request(url, method="GET")
             if api_key:
                 req.add_header("Authorization", f"Bearer {api_key}")
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            models = sorted(m.get("id", "") for m in data.get("data", []))
-            return {"provider": provider, "selected_model": selected_model, "models": models}
-        except Exception as e:
-            log_event(log, "llm_models_error", {"provider": "nvidia", "error": str(e)})
-            return {"provider": provider, "selected_model": selected_model, "models": [], "error": str(e)}
+            all_models = [m.get("id", "") for m in data.get("data", [])]
+        else:
+            all_models = []
 
-    return {"provider": provider, "selected_model": selected_model, "models": []}
+        filtered = await filter_vision_models(all_models, provider)
+        return {"provider": provider, "selected_model": selected_model, "models": filtered}
+    except Exception as e:
+        log_event(log, "llm_models_error", {"provider": provider, "error": str(e)})
+        return {"provider": provider, "selected_model": selected_model, "models": [], "error": str(e)}
 
 
 @app.post("/api/llm/model")
@@ -367,6 +491,30 @@ async def set_llm_model(request: Request):
     log_event(log, "api_llm_model_set", {"model": model})
     cfg = cfg_module.update({"llm_model": model})
     return {"ok": True, "llm_model": cfg.get("llm_model")}
+
+
+@app.get("/api/llm/models/test")
+async def llm_models_test():
+    """Re-run the model availability + vision test and refresh the cache.
+
+    Fetches all models from the configured LLM provider, filters out
+    unavailable / non-vision / paid models, and caches the result.
+
+    Rate-limited to one call per ``MODEL_TEST_MIN_INTERVAL_S`` seconds to
+    prevent accidental provider API flooding (DDOS protection).
+    """
+    global _last_model_test_time
+    now = time.monotonic()
+    if now - _last_model_test_time < MODEL_TEST_MIN_INTERVAL_S:
+        remaining = round(MODEL_TEST_MIN_INTERVAL_S - (now - _last_model_test_time), 1)
+        return JSONResponse(
+            {"error": f"Rate limited. Try again in {remaining}s.",
+             "next_test_in_s": remaining},
+            status_code=429,
+        )
+    _last_model_test_time = now
+    await _test_and_cache_models()
+    return _filtered_llm_models
 
 
 @app.get("/api/history")

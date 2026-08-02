@@ -35,6 +35,37 @@ pip install -r requirements.txt
     Open **http://localhost:8056** — pick the target window, set the
     interval, and leave auto-approve off until you trust the pipeline.
 
+## Using the NVIDIA Provider (Optional)
+
+ChartWatch supports NVIDIA's hosted API as an alternative to a local Ollama
+instance. To use it:
+
+1. **Obtain a free API key** at https://build.nvidia.com/models
+   - Sign in with a free NVIDIA Developer account
+   - Navigate to the **API** tab
+   - Create a new API key
+   - Copy the key
+
+2. **Add the key to `config.yaml`:**
+   ```yaml
+   provider: nvidia
+   nvidia:
+     api_key: "YOUR_NVIDIA_API_KEY_HERE"
+     base_url: "https://integrate.api.nvidia.com/v1"
+     model: "meta/llama-3.3-70b-instruct"
+   ```
+   Free vision-capable models include `meta/llama-3.3-70b-instruct`,
+   `google/gemma-3-27b-it`, and `nvidia/nemotron-vl-340b`.
+
+3. **Startup behavior:** On first launch the app fetches the model list from
+   NVIDIA, filters to only free vision-capable models, and caches the result
+   in `nvidia_models.json`. On subsequent startups the cached list is used
+   directly. The LLM status badge shows "Analyzing models..." (yellow) while
+   the test runs. Click the status badge to manually refresh the model list.
+
+**Switching providers:** To return to Ollama, set `provider: ollama` in
+`config.yaml` and ensure Ollama is running locally.
+
 ## Known TODOs (marked in code)
 
 - `chartwatch/mcp_client.py`: tool names (`open_position`, `close_position`,
@@ -76,6 +107,8 @@ pip install -r requirements.txt
 | GET | `/api/mcp/verify` | Probe MCP server reachability |
 | GET | `/api/health` | Check MCP + Ollama health |
 | GET | `/api/health/llm` | Check configured LLM provider (Ollama/NVIDIA) reachability |
+| GET | `/api/llm/models` | List filtered (vision-capable, free) models for the configured provider |
+| GET | `/api/llm/models/test` | Re-run the model availability + vision test and refresh the cache |
 | GET | `/api/health/prerequisites` | Check cTrader process + MCP reachability |
 | GET | `/api/history` | Fetch recent cycle history |
 | GET | `/api/scheduler/timing` | Get interval timing info |

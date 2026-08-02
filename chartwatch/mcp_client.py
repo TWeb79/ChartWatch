@@ -11,6 +11,7 @@ Version: 1.2.0  (deployment: 2026-08-02)
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import AsyncExitStack
 from typing import Any
@@ -27,6 +28,8 @@ TOOL_NAMES = {
     "open_position": "open_position",
     "close_position": "close_position",
     "modify_position": "modify_position",
+    "get_balance": "get_balance",
+    "get_symbol_price": "get_symbol_price",
 }
 
 _TOOL_ALIASES = {
@@ -34,6 +37,11 @@ _TOOL_ALIASES = {
     "open_position": ["open_position", "create_position", "OpenPosition", "PlaceOrder"],
     "close_position": ["close_position", "ClosePosition", "CloseTrade"],
     "modify_position": ["modify_position", "modify_sl", "ModifyPosition", "ModifyTrade"],
+    "get_balance": ["get_balance", "getAccountBalance", "GetBalance"],
+    "get_symbol_price": [
+        "get_symbol_price", "get_symbol_prices", "get_prices", "getQuotes",
+        "get_quote", "GetSymbolPrice", "SymbolPrice", "GetPrice",
+    ],
 }
 
 
@@ -121,16 +129,29 @@ class CTraderMCPClient:
         self._resolved_tools: dict[str, str] = {}
 
     async def connect(self) -> None:
-        """Connect to the cTrader MCP server and discover available tools."""
+        """Connect to the cTrader MCP server and discover available tools.
+
+        Includes a connection timeout to prevent indefinite hangs when the
+        server is unreachable or not responding.
+        """
         if self.session is not None:
             try:
                 await self.disconnect()
-            except Exception:
-                pass
+            except Exception as disconnect_err:
+                log_event(log, "mcp_disconnect_error", {"error": str(disconnect_err)})
         log_event(log, "mcp_connect_start", {"url": self.url})
-        read, write = await self._stack.enter_async_context(
-            streamable_http_client(self.url),
-        )
+        try:
+            read, write = await asyncio.wait_for(
+                self._stack.enter_async_context(streamable_http_client(self.url)),
+                timeout=10.0,
+            )
+        except asyncio.TimeoutError:
+            log_event(log, "mcp_connect_timeout", {"url": self.url})
+            raise ConnectionError(
+                f"MCP server at {self.url} did not respond within 10s — "
+                "is cTrader running?"
+            )
+
         self.session = await self._stack.enter_async_context(
             ClientSession(read, write),
         )
@@ -172,10 +193,28 @@ class CTraderMCPClient:
     async def _ensure_connected(self) -> bool:
         """Ensure the MCP session is connected, reconnecting if needed.
 
+        If the session object exists but the underlying connection may be
+        stale (e.g. HTTP connection timed out), attempts a lightweight
+        health check via ``call_tool``. If that fails, the session is
+        considered dead and a fresh connection is attempted.
+
         Returns True if the session is active, False if connection failed.
         """
         if self.session is not None:
-            return True
+            # Verify the session is actually alive, not just non-None
+            try:
+                await asyncio.wait_for(
+                    self.session.call_tool("get_server_time", {}),
+                    timeout=5.0,
+                )
+                return True
+            except Exception:
+                # Session is stale — disconnect and reconnect
+                log_event(log, "mcp_session_stale", {})
+                try:
+                    await self.disconnect()
+                except Exception as disconnect_err:
+                    log_event(log, "mcp_disconnect_error", {"error": str(disconnect_err)})
         try:
             await self.connect()
             return self.session is not None
@@ -224,7 +263,10 @@ class CTraderMCPClient:
                 f"Tool '{actual_name}' not found. "
                 f"Available: {list(self.available_tools.keys())}."
             )
-        result = await self.session.call_tool(actual_name, arguments)
+        result = await asyncio.wait_for(
+            self.session.call_tool(actual_name, arguments),
+            timeout=30.0,
+        )
         log_event(log, "mcp_response", {"tool": actual_name, "status": "ok"})
         for block in result.content:
             if hasattr(block, "text"):
@@ -361,6 +403,54 @@ class CTraderMCPClient:
                 "error": str(e),
             })
         return result
+
+    async def get_free_margin(self) -> float | None:
+        """Fetch the free margin for the configured account.
+
+        Calls the balance endpoint and extracts the ``free_margin`` field.
+        Falls back to ``equity`` if ``free_margin`` is not present, then
+        to ``balance``. Returns ``None`` if the MCP connection cannot be
+        established or the balance call fails.
+        """
+        balance = await self.get_account_balance()
+        if balance.get("balance") is None:
+            return None
+        # Prefer free_margin, fall back to equity, then balance
+        for field in ("free_margin", "equity", "balance"):
+            val = balance.get(field)
+            if val is not None:
+                return float(val)
+        return None
+
+    async def get_symbol_price(self, symbol: str) -> float | None:
+        """Fetch the current market price of a symbol from the cTrader MCP.
+
+        Args:
+            symbol: The trading symbol (e.g. ``"US500"``, ``"EURUSD"``).
+
+        Returns:
+            The current ask price as a float, or ``None`` if the price
+            cannot be retrieved.
+        """
+        if not await self._ensure_connected():
+            return None
+        raw = await self.call("get_symbol_price", {"symbol": symbol})
+        if isinstance(raw, dict):
+            # cTrader MCP may return {"symbol": ..., "bid": ..., "ask": ...}
+            # or {"price": ...} or {"rates": [{"ask": ..., "bid": ...}]}
+            if "ask" in raw:
+                return float(raw["ask"])
+            if "price" in raw:
+                return float(raw["price"])
+            if "rates" in raw and isinstance(raw["rates"], list) and raw["rates"]:
+                rate = raw["rates"][0]
+                if isinstance(rate, dict) and "ask" in rate:
+                    return float(rate["ask"])
+        log_event(log, "mcp_price_not_found", {
+            "symbol": symbol,
+            "raw": str(raw)[:200],
+        })
+        return None
 
     async def verify_account(self) -> dict[str, Any]:
         """Verify the active cTrader account matches the expected account_id.

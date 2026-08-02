@@ -13,4 +13,6 @@ chartwatch.db
 debug.log
 config.yaml
 config.yaml.test_backup
+# Ignore LLM model cache files (generated at startup)
+*_models.json
 .kilo/

@@ -159,10 +159,10 @@ class Scheduler:
                 delay = 1.0
                 for attempt in range(1, max_retries + 1):
                     try:
-                        await self.mcp.connect()
+                        await asyncio.wait_for(self.mcp.connect(), timeout=15.0)
                         self._ctrader_alerted = False
                         break
-                    except Exception as e:
+                    except (Exception, asyncio.TimeoutError) as e:
                         if attempt == max_retries:
                             # MCP connection failed — check if cTrader is running
                             ctrader_status = ctrader_check.check_ctrader_running()
@@ -386,6 +386,23 @@ class Scheduler:
                     result = await self.mcp.close_position(pos_id)
                 elif open_position_action == "trail_sl" and d.get("new_sl") is not None:
                     result = await self.mcp.modify_sl(pos_id, d["new_sl"])
+            else:
+                log_event(log, "execute_no_position_id", {
+                    "cycle_id": cycle_id,
+                    "action": open_position_action,
+                    "position_context": position_context,
+                })
+        elif open_position_action in ("close", "trail_sl"):
+            log_event(log, "execute_no_open_position", {
+                "cycle_id": cycle_id,
+                "action": open_position_action,
+                "new_sl": d.get("new_sl"),
+                "message": "Action requires an open position but none was found",
+            })
+            await self.on_event("log", {
+                "cycle_id": cycle_id,
+                "message": f"Cannot {open_position_action} — no open position found",
+            })
 
         if new_trade:
             t = new_trade
@@ -393,13 +410,111 @@ class Scheduler:
             symbol = position_context.get("symbol") if position_context else default_symbol
             if not isinstance(symbol, str):
                 symbol = "UNKNOWN"
+
+            # --- Position sizing based on free margin and leverage ---
+            # Formula: volume = (free_margin * leverage) / symbol_price
+            # Leverage is 30x. If calculated volume < 0.1 (minimum), skip trade.
+            leverage = 30
+            free_margin = await self.mcp.get_free_margin()
+            symbol_price = await self.mcp.get_symbol_price(symbol)
+            max_position_size = self.cfg.get("risk_limits", {}).get("max_position_size", 0.5)
+
+            log_event(log, "position_sizing", {
+                "cycle_id": cycle_id,
+                "symbol": symbol,
+                "free_margin": free_margin,
+                "symbol_price": symbol_price,
+                "leverage": leverage,
+                "max_position_size": max_position_size,
+            })
+
+            calculated_volume: float | None = None
+            if free_margin is not None and symbol_price is not None and symbol_price > 0:
+                calculated_volume = (free_margin * leverage) / symbol_price
+                log_event(log, "volume_calculated", {
+                    "cycle_id": cycle_id,
+                    "calculated_volume": round(calculated_volume, 4),
+                    "formula": f"({free_margin} * {leverage}) / {symbol_price}",
+                })
+
+                if calculated_volume < 0.1:
+                    log_event(log, "trade_skipped_insufficient_margin", {
+                        "cycle_id": cycle_id,
+                        "symbol": symbol,
+                        "free_margin": free_margin,
+                        "symbol_price": symbol_price,
+                        "calculated_volume": round(calculated_volume, 4),
+                        "minimum_volume": 0.1,
+                        "message": "Calculated volume below minimum (0.1) — trade skipped",
+                    })
+                    await self.on_event("log", {
+                        "cycle_id": cycle_id,
+                        "message": (
+                            f"Trade skipped: calculated volume {calculated_volume:.4f} "
+                            f"below minimum 0.1 (free_margin={free_margin}, "
+                            f"price={symbol_price})"
+                        ),
+                    })
+                    # Still record the decision but mark as not executed
+                    self.store.set_action(cycle_id, "skipped", mcp_result={
+                        "reason": "insufficient_free_margin",
+                        "calculated_volume": round(calculated_volume, 4),
+                        "free_margin": free_margin,
+                        "symbol_price": symbol_price,
+                    })
+                    return
+
+                # Cap volume at the configured max_position_size
+                volume = min(calculated_volume, max_position_size)
+                log_event(log, "volume_set", {
+                    "cycle_id": cycle_id,
+                    "volume": round(volume, 4),
+                    "source": "calculated_and_capped",
+                })
+            else:
+                # Fallback to config max position size if margin/price unavailable
+                volume = max_position_size
+                log_event(log, "volume_fallback", {
+                    "cycle_id": cycle_id,
+                    "volume": volume,
+                    "source": "config_max_position_size",
+                    "free_margin": free_margin,
+                    "symbol_price": symbol_price,
+                })
+
+            log_event(log, "trade_execute_start", {
+                "cycle_id": cycle_id,
+                "symbol": symbol,
+                "direction": t["direction"],
+                "volume": round(volume, 4),
+                "sl": t["sl"],
+                "tp": t["tp"],
+            })
+            await self.on_event("log", {
+                "cycle_id": cycle_id,
+                "message": (
+                    f"Executing {t['direction']} {symbol} vol={volume:.4f} "
+                    f"SL={t['sl']} TP={t['tp']}"
+                ),
+            })
             result = await self.mcp.open_position(
                 symbol=symbol,
                 direction=t["direction"],
-                volume=self.cfg["risk_limits"]["max_position_size"],
+                volume=volume,
                 sl=t["sl"],
                 tp=t["tp"],
             )
+            log_event(log, "trade_executed", {
+                "cycle_id": cycle_id,
+                "symbol": symbol,
+                "direction": t["direction"],
+                "volume": round(volume, 4),
+                "result": str(result)[:200],
+            })
+            await self.on_event("log", {
+                "cycle_id": cycle_id,
+                "message": f"Trade executed: {t['direction']} {symbol} vol={volume:.4f}",
+            })
 
         self.store.set_action(cycle_id, "executed", mcp_result=result)
 

@@ -818,6 +818,21 @@ function connectWs() {
     if (type === "mcp_connect_retry" || type === "mcp_call_error") {
       updateMcpStatus(false);
     }
+    if (type === "models_testing") {
+      llmStatusEl.textContent = "Analyzing models...";
+      llmStatusEl.className = "badge checking";
+    }
+    if (type === "models_ready") {
+      fetchLlmHealth();
+      fetchLlmModels();
+    }
+    if (type === "models_error") {
+      llmStatusEl.textContent = "Model test failed";
+      llmStatusEl.className = "badge disconnected";
+      if (payload.error) {
+        log(`⚠ Model test error: ${payload.error}`);
+      }
+    }
   };
   ws.onclose = () => {
     updateWsStatus("WS: disconnected — reconnecting...", "disconnected");

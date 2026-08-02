@@ -18,6 +18,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from .llm_utils import strip_markdown_code_fence
 from .logger import get_logger, log_event
 
 log = get_logger("chartwatch.nvidia")
@@ -143,27 +144,45 @@ def analyze(
     # NVIDIA NIM (OpenAI-compatible) expects images in the content array as
     # image_url blocks, not as a separate "images" key (which is the Ollama format).
     encoded_image = _encode_image(screenshot_path)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_content},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{encoded_image}"},
-                    },
-                ],
-            },
-        ],
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
-        stream=False,
-        timeout=timeout,
-    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_content},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{encoded_image}"},
+                        },
+                    ],
+                },
+            ],
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stream=False,
+            timeout=timeout,
+        )
+    except Exception as e:
+        error_msg = str(e)
+        if "multimodal" in error_msg.lower() or "enable-multimodal" in error_msg.lower():
+            raise ValueError(
+                f"Model '{model}' does not support vision/multimodal input. "
+                f"Enable multimodal processing on the NVIDIA NIM server "
+                f"(--enable-multimodal flag) or switch to a vision-capable model."
+            ) from e
+        if "404" in error_msg and ("Not found" in error_msg or "not found" in error_msg.lower()):
+            raise ValueError(
+                f"Model '{model}' is not available for your NVIDIA account. "
+                f"It may require special access, be region-restricted, or have been "
+                f"renamed. Try a different vision-capable model from the dropdown "
+                f"(e.g. 'meta/llama-3.2-11b-vision-instruct', "
+                f"'google/gemma-3-27b-it', or 'nvidia/nemotron-vl-340b')."
+            ) from e
+        raise ValueError(f"NVIDIA API call failed: {error_msg}") from e
     chat_elapsed = time.monotonic() - chat_start
     log_event(log, "nvidia_chat_timing", {"model": model, "chat_elapsed_s": round(chat_elapsed, 2)})
 
@@ -172,10 +191,11 @@ def analyze(
     if not raw or not raw.strip():
         log_event(log, "nvidia_parse_error", {"model": model, "error": "empty response from model"})
         raise ValueError(f"Model returned empty response for {screenshot_path}")
+    cleaned = strip_markdown_code_fence(raw)
     try:
-        result = json.loads(raw)
+        result = json.loads(cleaned)
         log_event(log, "nvidia_parse_ok", {"model": model})
         return result
     except json.JSONDecodeError as e:
         log_event(log, "nvidia_parse_error", {"model": model, "error": str(e)})
-        raise ValueError(f"Model did not return valid JSON: {raw!r}") from e
+        raise ValueError(f"Model did not return valid JSON: {cleaned!r}") from e
