@@ -1,6 +1,14 @@
+"""FastAPI application: serves the dashboard UI, REST API, and WebSocket
+real-time events for the ChartWatch trading assistant.
+
+Author: Inventions4All - github:TWeb79
+Version: 1.2.0  (deployment: 2026-08-02)
+"""
+
 from __future__ import annotations
 
 import asyncio
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -177,12 +185,22 @@ async def mcp_accounts():
         accounts = []
     selected_balance = None
     if account_id is not None:
-        try:
-            balance_result = await scheduler.mcp.call("get_balance", {})
-            if isinstance(balance_result, dict):
-                selected_balance = balance_result.get("balance")
-        except Exception:
-            pass
+        # Prefer the balance embedded in the accounts list for the selected
+        # account — the MCP get_balance call without an account_id argument
+        # returns the currently active cTrader account's balance, which may
+        # differ from the account the user selected in ChartWatch.
+        selected_account = next(
+            (a for a in accounts if a.get("id") == account_id), None
+        )
+        if selected_account and selected_account.get("balance") is not None:
+            selected_balance = selected_account.get("balance")
+        else:
+            try:
+                balance_result = await scheduler.mcp.call("get_balance", {})
+                if isinstance(balance_result, dict):
+                    selected_balance = balance_result.get("balance")
+            except Exception:
+                pass
     return {
         "accounts": accounts,
         "selectedAccountId": account_id,
@@ -242,6 +260,52 @@ async def prerequisites_check():
         return {"ok": False, "error": "scheduler not initialized"}
     cfg = scheduler.cfg
     return ctrader_check.check_prerequisites(cfg)
+
+
+@app.get("/api/health/llm")
+async def llm_health_check():
+    """Check reachability of the configured LLM provider (Ollama or NVIDIA NIM).
+
+    Returns:
+        Dict with ``provider``, ``model``, ``reachable`` (bool), and
+        ``error`` (str | None).
+    """
+    cfg = cfg_module.load()
+    provider = cfg.get("provider", "ollama")
+    llm_cfg = cfg.get("ollama") if provider == "ollama" else cfg.get("nvidia", {})
+    model = cfg.get("llm_model", llm_cfg.get("model", ""))
+
+    if provider == "ollama":
+        host = llm_cfg.get("host", "http://localhost:11434")
+        url = host.rstrip("/") + "/api/tags"
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                reachable = resp.status == 200
+            log_event(log, "llm_health_ok", {"provider": provider, "model": model})
+            return {"provider": provider, "model": model, "reachable": reachable, "error": None}
+        except Exception as e:
+            log_event(log, "llm_health_error", {"provider": provider, "error": str(e)})
+            return {"provider": provider, "model": model, "reachable": False, "error": str(e)}
+
+    if provider == "nvidia":
+        base_url = llm_cfg.get("base_url", "https://integrate.api.nvidia.com/v1")
+        api_key = llm_cfg.get("api_key", "")
+        url = base_url.rstrip("/") + "/models"
+        try:
+            req = urllib.request.Request(url, method="GET")
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                reachable = resp.status == 200
+            log_event(log, "llm_health_ok", {"provider": provider, "model": model})
+            return {"provider": provider, "model": model, "reachable": reachable, "error": None}
+        except Exception as e:
+            log_event(log, "llm_health_error", {"provider": provider, "error": str(e)})
+            return {"provider": provider, "model": model, "reachable": False, "error": str(e)}
+
+    log_event(log, "llm_health_unknown_provider", {"provider": provider})
+    return {"provider": provider, "model": model, "reachable": False, "error": f"Unknown provider: {provider}"}
 
 
 @app.get("/api/history")

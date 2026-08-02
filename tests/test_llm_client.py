@@ -1,10 +1,113 @@
-"""Tests for chartwatch nvidia_client and llm_client modules."""
+"""Tests for chartwatch ollama_client, nvidia_client and llm_client modules."""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from chartwatch import llm_client, nvidia_client
+from chartwatch import llm_client, nvidia_client, ollama_client
+
+
+class TestOllamaClientAnalyze:
+    def test_analyze_returns_dict(self):
+        mock_response = MagicMock()
+        mock_response.__getitem__.return_value.__getitem__.return_value = (
+            '{"assessment": "test", "trend_10min": "up", "confidence": 0.5, '
+            '"open_position_action": null, "new_trade": null}'
+        )
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.chat.return_value = mock_response
+
+        mock_client_cls = MagicMock()
+        mock_client_cls.return_value = mock_client_instance
+
+        with patch("chartwatch.ollama_client.ollama.Client", mock_client_cls):
+            with patch("chartwatch.ollama_client._encode_image") as mock_encode:
+                mock_encode.return_value = "base64data"
+                result = ollama_client.analyze(
+                    screenshot_path="/tmp/test.png",
+                    position_context=None,
+                    model="qwen3.5:9b",
+                    host="http://localhost:11434",
+                )
+
+        assert isinstance(result, dict)
+        assert result["assessment"] == "test"
+        assert result["trend_10min"] == "up"
+
+    def test_analyze_passes_timeout_to_client_constructor_not_chat(self):
+        """Regression: timeout must go to Client() constructor, not chat()."""
+        mock_response = MagicMock()
+        mock_response.__getitem__.return_value.__getitem__.return_value = (
+            '{"assessment": "test", "trend_10min": "up", "confidence": 0.5, '
+            '"open_position_action": null, "new_trade": null}'
+        )
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.chat.return_value = mock_response
+
+        mock_client_cls = MagicMock()
+        mock_client_cls.return_value = mock_client_instance
+
+        with patch("chartwatch.ollama_client.ollama.Client", mock_client_cls):
+            with patch("chartwatch.ollama_client._encode_image") as mock_encode:
+                mock_encode.return_value = "base64data"
+                ollama_client.analyze(
+                    screenshot_path="/tmp/test.png",
+                    position_context=None,
+                    model="qwen3.5:9b",
+                    host="http://localhost:11434",
+                )
+
+        # Client constructor should receive timeout
+        _, client_kwargs = mock_client_cls.call_args
+        assert client_kwargs.get("timeout") == 120.0
+
+        # chat() should NOT receive timeout
+        _, chat_kwargs = mock_client_instance.chat.call_args
+        assert "timeout" not in chat_kwargs
+
+    def test_analyze_raises_on_empty_response(self):
+        mock_response = MagicMock()
+        mock_response.__getitem__.return_value.__getitem__.return_value = ""
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.chat.return_value = mock_response
+
+        mock_client_cls = MagicMock()
+        mock_client_cls.return_value = mock_client_instance
+
+        with patch("chartwatch.ollama_client.ollama.Client", mock_client_cls):
+            with patch("chartwatch.ollama_client._encode_image") as mock_encode:
+                mock_encode.return_value = "base64data"
+                with pytest.raises(ValueError, match="empty response"):
+                    ollama_client.analyze(
+                        screenshot_path="/tmp/test.png",
+                        position_context=None,
+                        model="qwen3.5:9b",
+                        host="http://localhost:11434",
+                    )
+
+    def test_analyze_raises_on_invalid_json(self):
+        mock_response = MagicMock()
+        mock_response.__getitem__.return_value.__getitem__.return_value = "not json"
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.chat.return_value = mock_response
+
+        mock_client_cls = MagicMock()
+        mock_client_cls.return_value = mock_client_instance
+
+        with patch("chartwatch.ollama_client.ollama.Client", mock_client_cls):
+            with patch("chartwatch.ollama_client._encode_image") as mock_encode:
+                mock_encode.return_value = "base64data"
+                with pytest.raises(ValueError, match="did not return valid JSON"):
+                    ollama_client.analyze(
+                        screenshot_path="/tmp/test.png",
+                        position_context=None,
+                        model="qwen3.5:9b",
+                        host="http://localhost:11434",
+                    )
 
 
 class TestNvidiaClientAnalyze:

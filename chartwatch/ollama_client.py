@@ -1,6 +1,10 @@
 """Sends the screenshot + current position context to a local Ollama vision
 model and returns a parsed decision dict. Forces JSON-only output so the
-rest of the pipeline never has to parse free text."""
+rest of the pipeline never has to parse free text.
+
+Author: Inventions4All - github:TWeb79
+Version: 1.1.0  (deployment: 2026-08-02)
+"""
 
 from __future__ import annotations
 
@@ -71,7 +75,7 @@ def analyze(
         "host": host,
         "has_instruction_file": bool(instruction_file),
     })
-    client = ollama.Client(host=host)
+    client = ollama.Client(host=host, timeout=120.0)
 
     instruction_text = ""
     if instruction_file:
@@ -101,7 +105,6 @@ def analyze(
         ],
         format="json",
         options={"temperature": 0.2},
-        timeout=120.0,
     )
     chat_elapsed = time.monotonic() - chat_start
     log_event(log, "ollama_chat_timing", {"model": model, "chat_elapsed_s": round(chat_elapsed, 2)})

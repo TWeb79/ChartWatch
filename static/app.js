@@ -22,6 +22,7 @@ const denyBtn = document.getElementById("deny-btn");
 const wsStatusEl = document.getElementById("ws-status");
 const ctraderStatusEl = document.getElementById("ctrader-status");
 const mcpStatusEl = document.getElementById("mcp-status");
+const llmStatusEl = document.getElementById("llm-status");
 const kpiNextCycle = document.getElementById("kpi-next-cycle");
 const kpiConfidence = document.getElementById("kpi-confidence");
 const kpiPnl = document.getElementById("kpi-pnl");
@@ -463,6 +464,34 @@ function updateMcpStatus(connected, accountInfo) {
   }
 }
 
+async function fetchLlmHealth() {
+  try {
+    const res = await fetch("/api/health/llm");
+    const data = await res.json();
+    updateLlmStatus(data);
+    return data;
+  } catch (e) {
+    console.error("Failed to fetch LLM health:", e);
+    updateLlmStatus({ provider: "unknown", reachable: false, error: String(e) });
+    return { provider: "unknown", reachable: false };
+  }
+}
+
+function updateLlmStatus(data) {
+  if (!llmStatusEl) return;
+  const provider = data.provider || "unknown";
+  const model = data.model || "";
+  const shortModel = model ? ` ${model}` : "";
+  if (data.reachable) {
+    llmStatusEl.textContent = `${provider}${shortModel}: ready`;
+    llmStatusEl.className = "badge connected";
+  } else {
+    const err = data.error ? `: ${data.error}` : "";
+    llmStatusEl.textContent = `${provider}${shortModel}: unreachable${err}`;
+    llmStatusEl.className = "badge disconnected";
+  }
+}
+
 async function fetchMcpAccounts() {
   try {
     const res = await fetch("/api/mcp/accounts");
@@ -632,6 +661,12 @@ function connectWs() {
         lastCapturePath = payload.path;
         lastCaptureTime = now;
       }
+      // Refresh account info after screenshot taken — ensures current balance is known
+      fetchMcpAccounts().then(data => {
+        if (data.selectedBalance != null) {
+          log(`Account balance refreshed: ${data.selectedBalance}`);
+        }
+      });
     }
     if (type === "mcp_connect_ok") {
       updateMcpStatus(true, { login: selectedAccountLogin });
@@ -671,7 +706,8 @@ loadWindows();
 loadHistory();
 updateIntervalHint();
 fetchSystemStatus();
-setInterval(fetchSystemStatus, 30000);
+fetchLlmHealth();
+setInterval(fetchLlmHealth, 60000);
 
 const providerSelect = document.getElementById("setting-provider");
 const nvidiaSettings = document.getElementById("nvidia-settings");

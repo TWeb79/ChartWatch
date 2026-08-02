@@ -2,7 +2,8 @@
 
 import os
 import tempfile
-from unittest.mock import AsyncMock, MagicMock
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -115,6 +116,72 @@ class TestPrerequisitesEndpoint:
         assert "mcp" in data
 
 
+class TestLlmHealthEndpoint:
+    def test_ollama_provider_returns_structure(self, client):
+        """Verify /api/health/llm returns correct structure for Ollama provider."""
+        test_cfg = {
+            "provider": "ollama",
+            "ollama": {"host": "http://localhost:11434", "model": "qwen3.5:9b"},
+            "nvidia": {},
+        }
+        with patch.object(cfg_module, "load", return_value=test_cfg):
+            with patch("urllib.request.urlopen") as mock_urlopen:
+                mock_resp = MagicMock()
+                mock_resp.status = 200
+                mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+                mock_resp.__exit__ = MagicMock(return_value=None)
+                mock_urlopen.return_value = mock_resp
+                response = client.get("/api/health/llm")
+                assert response.status_code == 200
+                data = response.json()
+                assert data["provider"] == "ollama"
+                assert data["model"] == "qwen3.5:9b"
+                assert data["reachable"] is True
+                assert data["error"] is None
+
+    def test_ollama_unreachable(self, client):
+        """Verify unreachable Ollama is reported correctly."""
+        test_cfg = {
+            "provider": "ollama",
+            "ollama": {"host": "http://localhost:11434", "model": "qwen3.5:9b"},
+            "nvidia": {},
+        }
+        with patch.object(cfg_module, "load", return_value=test_cfg):
+            with patch("urllib.request.urlopen", side_effect=ConnectionRefusedError("refused")):
+                response = client.get("/api/health/llm")
+                assert response.status_code == 200
+                data = response.json()
+                assert data["provider"] == "ollama"
+                assert data["reachable"] is False
+                assert data["error"] is not None
+
+    def test_nvidia_provider_returns_structure(self, client):
+        """Verify /api/health/llm returns correct structure for NVIDIA provider."""
+        test_cfg = {
+            "provider": "nvidia",
+            "ollama": {},
+            "nvidia": {
+                "host": "http://localhost:11434",
+                "model": "thinkingmachines/inkling",
+                "api_key": "test-key",
+                "base_url": "https://integrate.api.nvidia.com/v1",
+            },
+            "llm_model": "thinkingmachines/inkling",
+        }
+        with patch.object(cfg_module, "load", return_value=test_cfg):
+            with patch("urllib.request.urlopen") as mock_urlopen:
+                mock_resp = MagicMock()
+                mock_resp.status = 200
+                mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+                mock_resp.__exit__ = MagicMock(return_value=None)
+                mock_urlopen.return_value = mock_resp
+                response = client.get("/api/health/llm")
+                assert response.status_code == 200
+                data = response.json()
+                assert data["provider"] == "nvidia"
+                assert data["reachable"] is True
+
+
 class TestMcpAccountsEndpoint:
     def test_accounts_returns_structure(self, client):
         scheduler = api._state["scheduler"]
@@ -133,7 +200,29 @@ class TestMcpAccountsEndpoint:
         assert "accounts" in data
         assert len(data["accounts"]) == 2
         assert data["selectedAccountId"] == 48131263
+        # Balance should come from the accounts list for the selected account,
+        # NOT from a separate get_balance call that doesn't specify the account.
+        assert data["selectedBalance"] == 1000.0
+        # get_balance should NOT have been called since we got balance from the list
+        scheduler.mcp.call.assert_not_called()
+
+    def test_accounts_fallback_to_get_balance_when_not_in_list(self, client):
+        """When the selected account is not in the accounts list, fall back to get_balance."""
+        scheduler = api._state["scheduler"]
+        scheduler.mcp.get_accounts = AsyncMock(
+            return_value=[
+                {"id": 48131264, "login": 4262700, "balance": 500.0, "currency": "USD"},
+            ]
+        )
+        scheduler.mcp.call = AsyncMock(return_value={"balance": 166.24})
+        scheduler.cfg = {"ctrader_mcp": {"account_id": 999999}}
+
+        response = client.get("/api/mcp/accounts")
+        assert response.status_code == 200
+        data = response.json()
         assert data["selectedBalance"] == 166.24
+        # get_balance should have been called as fallback
+        scheduler.mcp.call.assert_called_once_with("get_balance", {})
 
     def test_accounts_no_mcp_returns_empty(self, client):
         api._state["scheduler"].mcp = None

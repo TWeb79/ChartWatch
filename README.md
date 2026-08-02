@@ -1,5 +1,5 @@
 # ChartWatch
-by Inventions4All - github:TWeb79 - Version 2026-08-02
+by Inventions4All - github:TWeb79 - Version 2026-08-02 (deployment: 2026-08-02T11:42)
 
 
 Periodically screenshots a chosen macOS window (e.g. cTrader), sends it to a
@@ -75,6 +75,7 @@ pip install -r requirements.txt
 | GET | `/api/mcp/accounts` | Fetch all cTrader accounts + selected balance |
 | GET | `/api/mcp/verify` | Probe MCP server reachability |
 | GET | `/api/health` | Check MCP + Ollama health |
+| GET | `/api/health/llm` | Check configured LLM provider (Ollama/NVIDIA) reachability |
 | GET | `/api/health/prerequisites` | Check cTrader process + MCP reachability |
 | GET | `/api/history` | Fetch recent cycle history |
 | GET | `/api/scheduler/timing` | Get interval timing info |
