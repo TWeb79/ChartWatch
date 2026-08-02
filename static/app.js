@@ -45,6 +45,11 @@ let effectiveIntervalSeconds = 0;
 let lastHistoryData = "";
 let prerequisitesOk = false;
 let currentProvider = "ollama";
+let llmLastKnownProvider = "unknown";
+let llmLastKnownModel = "";
+let llmModelDropdownOpen = false;
+let llmModelDropdownEl = null;
+let llmModels = [];
 
 async function fetchSystemStatus() {
   try {
@@ -121,6 +126,11 @@ function showOllamaResponse(parsed) {
   const detailsEl = document.getElementById("ollama-details");
   const expandBtn = document.getElementById("ollama-expand-btn");
   const summaryEl = document.querySelector(".ollama-summary");
+  const summaryTarget = summaryEl || (() => {
+    ollamaResponseEl.classList.remove("ollama-empty");
+    ollamaResponseEl.innerHTML = '<div class="ollama-summary"></div>';
+    return ollamaResponseEl.querySelector(".ollama-summary");
+  })();
 
   const direction = parsed.trend_10min || "-";
   const confidence = parsed.confidence != null ? parsed.confidence : "-";
@@ -137,7 +147,7 @@ function showOllamaResponse(parsed) {
   html += `<span class="ollama-time">${timeStr}</span>`;
   html += `</div>`;
 
-  summaryEl.innerHTML = html;
+  summaryTarget.innerHTML = html;
 
   detailsEl.textContent = JSON.stringify(parsed, null, 2);
   detailsEl.classList.add("hidden");
@@ -465,21 +475,37 @@ function updateMcpStatus(connected, accountInfo) {
 }
 
 async function fetchLlmHealth() {
+  let data;
   try {
     const res = await fetch("/api/health/llm");
-    const data = await res.json();
-    updateLlmStatus(data);
-    return data;
+    data = await res.json();
   } catch (e) {
     console.error("Failed to fetch LLM health:", e);
-    updateLlmStatus({ provider: "unknown", reachable: false, error: String(e) });
-    return { provider: "unknown", reachable: false };
+    // Retry once after a short delay before declaring unreachable
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    try {
+      const res2 = await fetch("/api/health/llm");
+      data = await res2.json();
+    } catch (e2) {
+      console.error("LLM health retry failed:", e2);
+      data = { provider: llmLastKnownProvider, model: llmLastKnownModel, reachable: false, error: String(e2) };
+    }
   }
+  if (data.reachable) {
+    llmLastKnownProvider = data.provider || llmLastKnownProvider;
+    llmLastKnownModel = data.model || llmLastKnownModel;
+  } else if (data.provider === "unknown") {
+    data.provider = llmLastKnownProvider;
+    data.model = llmLastKnownModel;
+  }
+  updateLlmStatus(data);
+  return data;
 }
 
 function updateLlmStatus(data) {
   if (!llmStatusEl) return;
   const provider = data.provider || "unknown";
+  currentProvider = provider;
   const model = data.model || "";
   const shortModel = model ? ` ${model}` : "";
   if (data.reachable) {
@@ -609,7 +635,110 @@ document.addEventListener("click", (e) => {
   ) {
     closeAccountDropdown();
   }
+  if (
+    llmModelDropdownOpen &&
+    llmStatusEl &&
+    !llmStatusEl.contains(e.target) &&
+    llmModelDropdownEl &&
+    !llmModelDropdownEl.contains(e.target)
+  ) {
+    closeLlmModelDropdown();
+  }
 });
+
+async function fetchLlmModels() {
+  try {
+    const res = await fetch("/api/llm/models");
+    const data = await res.json();
+    llmModels = data.models || [];
+    return data;
+  } catch (e) {
+    console.error("Failed to fetch LLM models:", e);
+    return { provider: currentProvider, models: [], selected_model: "" };
+  }
+}
+
+function closeLlmModelDropdown() {
+  if (llmModelDropdownEl) {
+    llmModelDropdownEl.remove();
+    llmModelDropdownEl = null;
+  }
+  llmModelDropdownOpen = false;
+}
+
+function showLlmModelDropdown(data) {
+  closeLlmModelDropdown();
+  llmModelDropdownOpen = true;
+  const dropdown = document.createElement("div");
+  dropdown.className = "account-dropdown";
+
+  const title = document.createElement("div");
+  title.className = "account-dropdown-item";
+  title.style.fontWeight = "700";
+  title.style.color = "var(--accent)";
+  title.textContent = `LLM Models (${data.provider})`;
+  dropdown.appendChild(title);
+
+  data.models.forEach(model => {
+    const item = document.createElement("div");
+    item.className = "account-dropdown-item" + (model === data.selected_model ? " selected" : "");
+    item.textContent = model;
+    item.onclick = async () => {
+      await selectLlmModel(model);
+      closeLlmModelDropdown();
+    };
+    dropdown.appendChild(item);
+  });
+
+  if (data.models.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "account-dropdown-item";
+    empty.style.color = "var(--muted)";
+    empty.textContent = "No models available";
+    dropdown.appendChild(empty);
+  }
+
+  document.body.appendChild(dropdown);
+  llmModelDropdownEl = dropdown;
+
+  if (llmStatusEl) {
+    const rect = llmStatusEl.getBoundingClientRect();
+    dropdown.style.top = (rect.bottom + window.scrollY) + "px";
+    dropdown.style.right = (window.innerWidth - rect.right + window.scrollX) + "px";
+  }
+}
+
+async function selectLlmModel(model) {
+  try {
+    const res = await fetch("/api/llm/model", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: model }),
+    });
+    if (res.ok) {
+      log(`Selected LLM model: ${model}`);
+      fetchLlmHealth();
+    } else {
+      log(`Failed to set model: ${res.status}`);
+    }
+  } catch (e) {
+    console.error("Failed to set LLM model:", e);
+    log(`Failed to set model: ${e}`);
+  }
+  closeLlmModelDropdown();
+}
+
+if (llmStatusEl) {
+  llmStatusEl.style.cursor = "pointer";
+  llmStatusEl.addEventListener("click", async () => {
+    if (llmModelDropdownOpen) {
+      closeLlmModelDropdown();
+    } else {
+      const data = await fetchLlmModels();
+      showLlmModelDropdown(data);
+    }
+  });
+}
 
 function connectWs() {
   updateWsStatus("WS: connecting...", "");
@@ -623,7 +752,13 @@ function connectWs() {
   ws.onmessage = (evt) => {
     const { type, payload } = JSON.parse(evt.data);
     if (type === "cycle_start") {
-      ollamaResponseEl.textContent = "Analyzing...";
+      ollamaResponseEl.classList.remove("ollama-empty");
+      const summaryEl = ollamaResponseEl.querySelector(".ollama-summary");
+      if (summaryEl) {
+        summaryEl.innerHTML = "Analyzing...";
+      } else {
+        ollamaResponseEl.innerHTML = '<div class="ollama-summary">Analyzing...</div>';
+      }
       startCountdown(effectiveIntervalSeconds || 300);
       statusEl.textContent = "Running";
       statusEl.classList.add("running");
@@ -648,10 +783,19 @@ function connectWs() {
       try {
         const parsed = typeof payload.response === "string" ? JSON.parse(payload.response) : payload.response;
         showOllamaResponse(parsed);
-      } catch {
-        ollamaResponseEl.textContent = String(payload.response);
+      } catch (e) {
+        console.error("Failed to render model response:", e);
+        const raw = payload.response;
+        const text = typeof raw === "string" ? raw : JSON.stringify(raw, null, 2);
+        ollamaResponseEl.classList.remove("ollama-empty");
+        const summaryEl = ollamaResponseEl.querySelector(".ollama-summary");
+        if (summaryEl) {
+          summaryEl.textContent = text;
+        } else {
+          ollamaResponseEl.innerHTML = `<div class="ollama-summary">${escapeHtml(text)}</div>`;
+        }
       }
-      log("Ollama response received and displayed");
+      log(`${currentProvider} response received and displayed`);
       loadHistory();
     }
     if (type === "capture") {

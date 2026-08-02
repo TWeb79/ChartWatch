@@ -90,3 +90,26 @@ class TestHTMLIDs:
             "id='history-table' must appear exactly once (dedicated History page); "
             "the Dashboard summary table must use a different id"
         )
+
+
+class TestModelResponseRendering:
+    def test_ollama_response_not_set_via_text_content(self):
+        """Regression: cycle_start must not use ollamaResponseEl.textContent
+        (which destroys the .ollama-summary child) — that caused
+        showOllamaResponse to crash and the catch block to render [object Object]."""
+        with open(JS_PATH, encoding="utf-8") as f:
+            content = f.read()
+        assert "ollamaResponseEl.textContent" not in content, (
+            "ollamaResponseEl.textContent assignment destroys child elements; "
+            "update .ollama-summary directly instead"
+        )
+
+    def test_model_response_catch_does_not_use_string_cast(self):
+        """Regression: the model_response catch block must not use
+        String(payload.response) which renders '[object Object]' for dicts."""
+        with open(JS_PATH, encoding="utf-8") as f:
+            content = f.read()
+        assert "String(payload.response)" not in content, (
+            "String(payload.response) renders '[object Object]' for non-string "
+            "payloads; use JSON.stringify instead"
+        )

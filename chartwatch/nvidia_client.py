@@ -76,6 +76,7 @@ def analyze(
     instruction_file: str = "",
     account_balance: dict[str, Any] | None = None,
     timeout: float = 30.0,
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> dict[str, Any]:
     """Analyze a screenshot using the NVIDIA NIM vision model.
 
@@ -93,6 +94,9 @@ def analyze(
             for the configured cTrader account, included in the prompt
             so the model can suggest appropriate position sizing.
         timeout: Maximum seconds to wait for the API response.
+        system_prompt: System prompt override; defaults to the module-level
+            ``SYSTEM_PROMPT``. If the config provides a ``nvidia.prompt``
+            field, that value is used instead for richer instructions.
 
     Returns:
         Parsed decision dict from the model.
@@ -100,12 +104,15 @@ def analyze(
     Raises:
         ValueError: If the model returns empty or non-JSON output.
     """
+    if not system_prompt:
+        system_prompt = SYSTEM_PROMPT
     log_event(log, "nvidia_analyze_start", {
         "screenshot": screenshot_path,
         "model": model,
         "base_url": base_url,
         "has_instruction_file": bool(instruction_file),
         "has_account_balance": account_balance is not None,
+        "system_prompt_length": len(system_prompt),
     })
     client = OpenAI(
         api_key=api_key,
@@ -139,7 +146,7 @@ def analyze(
     response = client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {
                 "role": "user",
                 "content": [

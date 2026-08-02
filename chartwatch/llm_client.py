@@ -66,6 +66,7 @@ def analyze(
             instruction_file=ollama_cfg.get("instruction_file", instruction_file),
             account_balance=account_balance,
             timeout=timeout,
+            system_prompt=ollama_cfg.get("prompt", ""),
         )
 
     if provider == "nvidia":
@@ -83,6 +84,7 @@ def analyze(
             instruction_file=nvidia_cfg.get("instruction_file", instruction_file),
             account_balance=account_balance,
             timeout=timeout,
+            system_prompt=nvidia_cfg.get("prompt", ""),
         )
 
     raise ValueError(

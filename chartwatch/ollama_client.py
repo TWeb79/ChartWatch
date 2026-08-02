@@ -70,6 +70,7 @@ def analyze(
     instruction_file: str = "",
     account_balance: Optional[dict[str, Any]] = None,
     timeout: float = 120.0,
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> dict[str, Any]:
     """Analyze a screenshot using the Ollama vision model.
 
@@ -82,6 +83,10 @@ def analyze(
         account_balance: Optional dict with ``balance`` and ``currency``
             for the configured cTrader account, included in the prompt
             so the model can suggest appropriate position sizing.
+        timeout: Maximum seconds to wait for the Ollama response.
+        system_prompt: System prompt override; defaults to the module-level
+            ``SYSTEM_PROMPT``. If the config provides an ``ollama.prompt``
+            field, that value is used instead for richer instructions.
 
     Returns:
         Parsed decision dict from the model.
@@ -89,12 +94,15 @@ def analyze(
     Raises:
         ValueError: If the model returns empty or non-JSON output.
     """
+    if not system_prompt:
+        system_prompt = SYSTEM_PROMPT
     log_event(log, "ollama_analyze_start", {
         "screenshot": screenshot_path,
         "model": model,
         "host": host,
         "has_instruction_file": bool(instruction_file),
         "has_account_balance": account_balance is not None,
+        "system_prompt_length": len(system_prompt),
     })
     client = ollama.Client(host=host, timeout=timeout)
 
@@ -122,7 +130,7 @@ def analyze(
     response = client.chat(
         model=model,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {
                 "role": "user",
                 "content": user_content,

@@ -8,6 +8,7 @@ Version: 1.2.0  (deployment: 2026-08-02)
 from __future__ import annotations
 
 import asyncio
+import json
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -306,6 +307,66 @@ async def llm_health_check():
 
     log_event(log, "llm_health_unknown_provider", {"provider": provider})
     return {"provider": provider, "model": model, "reachable": False, "error": f"Unknown provider: {provider}"}
+
+
+@app.get("/api/llm/models")
+async def llm_models():
+    """List available models for the configured LLM provider.
+
+    Returns:
+        Dict with ``provider``, ``selected_model``, ``selected_llm_model``,
+        and ``models`` (list of model strings sorted alphabetically).
+    """
+    cfg = cfg_module.load()
+    provider = cfg.get("provider", "ollama")
+    llm_cfg = cfg.get(provider, {})
+    selected_model = cfg.get("llm_model", llm_cfg.get("model", ""))
+
+    if provider == "ollama":
+        host = llm_cfg.get("host", "http://localhost:11434")
+        url = host.rstrip("/") + "/api/tags"
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            models = sorted(m.get("name", m.get("model", "")) for m in data.get("models", []))
+            return {"provider": provider, "selected_model": selected_model, "models": models}
+        except Exception as e:
+            log_event(log, "llm_models_error", {"provider": "ollama", "error": str(e)})
+            return {"provider": provider, "selected_model": selected_model, "models": [], "error": str(e)}
+
+    if provider == "nvidia":
+        base_url = llm_cfg.get("base_url", "https://integrate.api.nvidia.com/v1")
+        api_key = llm_cfg.get("api_key", "")
+        url = base_url.rstrip("/") + "/models"
+        try:
+            req = urllib.request.Request(url, method="GET")
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            models = sorted(m.get("id", "") for m in data.get("data", []))
+            return {"provider": provider, "selected_model": selected_model, "models": models}
+        except Exception as e:
+            log_event(log, "llm_models_error", {"provider": "nvidia", "error": str(e)})
+            return {"provider": provider, "selected_model": selected_model, "models": [], "error": str(e)}
+
+    return {"provider": provider, "selected_model": selected_model, "models": []}
+
+
+@app.post("/api/llm/model")
+async def set_llm_model(request: Request):
+    """Set the LLM model for the configured provider.
+
+    Persists ``llm_model`` in config.yaml so the selection survives restarts.
+    """
+    body = await request.json()
+    model = body.get("model", "")
+    if not model:
+        return JSONResponse({"error": "model required"}, status_code=400)
+    log_event(log, "api_llm_model_set", {"model": model})
+    cfg = cfg_module.update({"llm_model": model})
+    return {"ok": True, "llm_model": cfg.get("llm_model")}
 
 
 @app.get("/api/history")
