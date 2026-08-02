@@ -41,6 +41,12 @@ def check_ctrader_running() -> dict[str, Any]:
 def check_mcp_available(url: str, timeout: int = 5) -> dict[str, Any]:
     """Check whether the cTrader MCP server endpoint is reachable.
 
+    The MCP server uses Streamable HTTP transport — a plain GET to the
+    MCP URL returns HTTP 400 (Bad Request) because it expects MCP
+    protocol messages, not a plain HTTP GET. Therefore, any HTTP
+    response (including 4xx) means the server is running and reachable.
+    Only connection refused or timeout counts as unreachable.
+
     Args:
         url: The MCP server URL (e.g. ``http://127.0.0.1:9876/mcp/``).
         timeout: Maximum seconds to wait for a response.
@@ -49,12 +55,18 @@ def check_mcp_available(url: str, timeout: int = 5) -> dict[str, Any]:
         Dict with ``reachable`` (bool), ``url`` (str), and optional
         ``status`` or ``error`` fields.
     """
+    import urllib.error
     result: dict[str, Any] = {"url": url, "reachable": False}
     try:
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             result["reachable"] = True
             result["status"] = resp.status
+    except urllib.error.HTTPError as e:
+        # HTTP 400 from the MCP server is expected for a plain GET —
+        # the server is running and responding.
+        result["reachable"] = True
+        result["status"] = e.code
     except Exception as e:
         result["error"] = str(e)
     return result

@@ -58,6 +58,21 @@ class TestCheckMcpAvailable:
             assert result["reachable"] is False
             assert "error" in result
 
+    def test_mcp_reachable_on_http_400(self):
+        """MCP server returns HTTP 400 for plain GET — server is still running."""
+        import urllib.error
+        with patch("chartwatch.ctrader_check.urllib.request.urlopen") as mock_open:
+            mock_open.side_effect = urllib.error.HTTPError(
+                url="http://127.0.0.1:9876/mcp/",
+                code=400,
+                msg="Bad Request",
+                hdrs=None,
+                fp=None,
+            )
+            result = ctrader_check.check_mcp_available("http://127.0.0.1:9876/mcp/")
+            assert result["reachable"] is True
+            assert result["status"] == 400
+
 
 class TestCheckPrerequisites:
     def test_all_ok(self):

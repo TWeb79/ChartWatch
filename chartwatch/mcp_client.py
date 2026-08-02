@@ -277,14 +277,24 @@ class CTraderMCPClient:
         await self._stack.aclose()
 
     async def verify(self) -> dict[str, Any]:
-        """Probe the MCP endpoint and return diagnostic info without fully connecting."""
-        import urllib.request
+        """Probe the MCP endpoint and return diagnostic info without fully connecting.
+
+        The MCP server uses Streamable HTTP transport — a plain GET returns
+        HTTP 400 (Bad Request) because it expects MCP protocol messages.
+        A 400 response means the server is running, so we treat any HTTP
+        response as reachable.
+        """
+        import urllib.error
         result = {"url": self.url, "reachable": False, "status": None, "tools": []}
         try:
             req = urllib.request.Request(self.url, method="GET")
             with urllib.request.urlopen(req, timeout=5) as resp:
                 result["reachable"] = True
                 result["status"] = resp.status
+        except urllib.error.HTTPError as e:
+            # HTTP 400 from MCP server is expected for plain GET — server is running
+            result["reachable"] = True
+            result["status"] = e.code
         except Exception as e:
             result["error"] = str(e)
         return result
