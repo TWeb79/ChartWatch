@@ -5,7 +5,7 @@ and that the MCP endpoint is reachable before attempting a capture
 or analysis cycle.
 
 Author: Inventions4All - github:TWeb79
-Version: 1.0.0  (deployment: 2026-08-01)
+Version: 1.1.0  (deployment: 2026-08-02)
 """
 
 from __future__ import annotations

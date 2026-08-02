@@ -70,6 +70,17 @@ which silently aborted all Start/Stop/WS-log handlers before they could
 reach `fetch(...)`. The WebSocket `log` event now has a working UI consumer
 again.
 
+## Status Check Flow
+
+The dashboard and scheduler use a consolidated status check approach:
+
+1. **`GET /api/health/prerequisites`** (via `ctrader_check.check_prerequisites`) checks both cTrader process and MCP reachability
+2. If MCP is reachable, the cTrader process check is redundant (the MCP server is provided by cTrader) — the dashboard hides the cTrader badge
+3. If MCP is not reachable, the dashboard shows the cTrader process status and prompts the user to launch cTrader
+4. The scheduler (`scheduler.py`) mirrors this logic: it attempts MCP connection first, and only checks the cTrader process when MCP connection fails. A `_ctrader_alerted` flag prevents repeated error broadcasts when cTrader remains down.
+
+WebSocket `error` events are displayed in the Activity Log with a `⚠` prefix.
+
 ## Account Selector
 
 When the application starts, the dashboard fetches all available cTrader
