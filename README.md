@@ -1,5 +1,5 @@
 # ChartWatch
-by Inventions4All - github:TWeb79 - Version 2026-08-01
+by Inventions4All - github:TWeb79 - Version 2026-08-02
 
 
 Periodically screenshots a chosen macOS window (e.g. cTrader), sends it to a
@@ -32,8 +32,8 @@ pip install -r requirements.txt
    ```bash
    python main.py
    ```
-   Open **http://localhost:8765** — pick the target window, set the
-   interval, and leave auto-approve off until you trust the pipeline.
+    Open **http://localhost:8056** — pick the target window, set the
+    interval, and leave auto-approve off until you trust the pipeline.
 
 ## Known TODOs (marked in code)
 
@@ -60,5 +60,32 @@ pip install -r requirements.txt
 - Strongly recommended: run against a cTrader **demo account** first. A
   local vision model reading a chart screenshot is meaningfully less
   reliable than dedicated market-data-driven trading logic, and errors
-  here have real financial consequences.
-# ChartWatch
+    here have real financial consequences.
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/windows` | List available macOS windows for target selection |
+| POST | `/api/config/target-window` | Set target window by ID and title |
+| POST | `/api/config/interval` | Set polling interval in minutes |
+| POST | `/api/config/auto-approve` | Toggle auto-approve trades |
+| POST | `/api/config` | Patch arbitrary config keys (merge) |
+| POST | `/api/config/ctrader-account` | Set active cTrader `account_id` |
+| GET | `/api/mcp/accounts` | Fetch all cTrader accounts + selected balance |
+| GET | `/api/mcp/verify` | Probe MCP server reachability |
+| GET | `/api/health` | Check MCP + Ollama health |
+| GET | `/api/health/prerequisites` | Check cTrader process + MCP reachability |
+| GET | `/api/history` | Fetch recent cycle history |
+| GET | `/api/scheduler/timing` | Get interval timing info |
+| POST | `/api/scheduler/start` | Trigger a single cycle immediately |
+| POST | `/api/scheduler/stop` | Stop the scheduler loop |
+| POST | `/api/approve/{cycle_id}` | Approve a pending trade proposal |
+| POST | `/api/deny/{cycle_id}` | Deny a pending trade proposal |
+| WS | `/ws` | Real-time events (cycle start, log, model response, etc.) |
+
+### Account selector
+
+Click the MCP status badge in the header to open an account dropdown.
+Select an account to persist it via `POST /api/config/ctrader-account`.
+The Settings page also has a cTrader Account selector under Configuration.

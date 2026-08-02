@@ -28,6 +28,11 @@ const kpiPositions = document.getElementById("kpi-positions");
 const kpiTrend = document.getElementById("kpi-trend");
 const kpiCountdown = document.getElementById("kpi-countdown");
 
+let mcpAccountDropdownOpen = false;
+let mcpAccountDropdownEl = null;
+let selectedAccountId = null;
+let selectedAccountLogin = null;
+
 let countdownTimer = null;
 let currentCycleId = null;
 let lastCapturePath = null;
@@ -423,16 +428,136 @@ function updateWsStatus(status, className) {
   wsStatusEl.className = "badge " + (className || "");
 }
 
-function updateMcpStatus(connected) {
+function updateMcpStatus(connected, accountInfo) {
   if (!mcpStatusEl) return;
   if (connected) {
-    mcpStatusEl.textContent = "MCP: connected";
+    const login = accountInfo?.login ?? "";
+    mcpStatusEl.textContent = `MCP: connected${login ? ` (login ${login})` : ""}`;
     mcpStatusEl.className = "badge connected";
   } else {
     mcpStatusEl.textContent = "MCP: offline";
     mcpStatusEl.className = "badge disconnected";
   }
 }
+
+async function fetchMcpAccounts() {
+  try {
+    const res = await fetch("/api/mcp/accounts");
+    const data = await res.json();
+    selectedAccountId = data.selectedAccountId;
+    selectedAccountLogin = null;
+    if (data.accounts && data.selectedAccountId != null) {
+      const sel = data.accounts.find(a => a.id === data.selectedAccountId);
+      if (sel) selectedAccountLogin = sel.login;
+    }
+    updateMcpStatus(true, { login: selectedAccountLogin });
+    return data;
+  } catch (e) {
+    console.error("Failed to fetch MCP accounts:", e);
+    updateMcpStatus(false);
+    return { accounts: [], selectedAccountId: null, selectedBalance: null };
+  }
+}
+
+function closeAccountDropdown() {
+  if (mcpAccountDropdownEl) {
+    mcpAccountDropdownEl.remove();
+    mcpAccountDropdownEl = null;
+  }
+  mcpAccountDropdownOpen = false;
+}
+
+function populateAccountItems(dropdown, data) {
+  const accounts = data.accounts || [];
+  accounts.forEach(acc => {
+    const item = document.createElement("div");
+    item.className = "account-dropdown-item" + (acc.id === selectedAccountId ? " selected" : "");
+    const loginText = `login ${acc.login}`;
+    const balText = acc.balance != null ? `${acc.balance} ${acc.currency || ""}` : "—";
+    item.textContent = `${loginText} (id: ${acc.id}) — ${balText}`;
+    item.onclick = async () => {
+      await selectAccount(acc.id, acc.login);
+      closeAccountDropdown();
+    };
+    dropdown.appendChild(item);
+  });
+}
+
+function positionDropdown(dropdown) {
+  if (!mcpStatusEl) return;
+  const rect = mcpStatusEl.getBoundingClientRect();
+  dropdown.style.top = (rect.bottom + window.scrollY) + "px";
+  dropdown.style.right = (window.innerWidth - rect.right + window.scrollX) + "px";
+}
+
+function showAccountDropdown(data) {
+  closeAccountDropdown();
+  mcpAccountDropdownOpen = true;
+  const dropdown = document.createElement("div");
+  dropdown.className = "account-dropdown";
+
+  const refreshBtn = document.createElement("button");
+  refreshBtn.className = "account-dropdown-refresh";
+  refreshBtn.textContent = "Refresh";
+  refreshBtn.onclick = async () => {
+    const newData = await fetchMcpAccounts();
+    while (dropdown.children.length > 1) {
+      dropdown.removeChild(dropdown.lastChild);
+    }
+    populateAccountItems(dropdown, newData);
+    positionDropdown(dropdown);
+  };
+  dropdown.appendChild(refreshBtn);
+  populateAccountItems(dropdown, data);
+  document.body.appendChild(dropdown);
+  mcpAccountDropdownEl = dropdown;
+  positionDropdown(dropdown);
+}
+
+async function selectAccount(accountId, login) {
+  try {
+    const res = await fetch("/api/config/ctrader-account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account_id: accountId }),
+    });
+    if (res.ok) {
+      selectedAccountId = accountId;
+      selectedAccountLogin = login;
+      updateMcpStatus(true, { login: login });
+      log(`Selected cTrader account: login ${login} (id: ${accountId})`);
+    } else {
+      log(`Failed to set account: ${res.status}`);
+    }
+  } catch (e) {
+    console.error("Failed to set cTrader account:", e);
+    log(`Failed to set account: ${e}`);
+  }
+}
+
+if (mcpStatusEl) {
+  mcpStatusEl.style.cursor = "pointer";
+  mcpStatusEl.addEventListener("click", async () => {
+    if (mcpAccountDropdownOpen) {
+      closeAccountDropdown();
+    } else {
+      const data = await fetchMcpAccounts();
+      showAccountDropdown(data);
+    }
+  });
+}
+
+document.addEventListener("click", (e) => {
+  if (
+    mcpAccountDropdownOpen &&
+    mcpStatusEl &&
+    !mcpStatusEl.contains(e.target) &&
+    mcpAccountDropdownEl &&
+    !mcpAccountDropdownEl.contains(e.target)
+  ) {
+    closeAccountDropdown();
+  }
+});
 
 function connectWs() {
   updateWsStatus("WS: connecting...", "");
@@ -482,8 +607,8 @@ function connectWs() {
         lastCaptureTime = now;
       }
     }
-    if (type === "mcp_connect_ok") {
-      updateMcpStatus(true);
+     if (type === "mcp_connect_ok") {
+      updateMcpStatus(true, { login: selectedAccountLogin });
     }
     if (type === "mcp_connect_retry" || type === "mcp_call_error") {
       updateMcpStatus(false);
@@ -520,7 +645,9 @@ loadWindows();
 loadHistory();
 updateIntervalHint();
 fetchPrerequisites();
+fetchMcpAccounts();
 setInterval(fetchPrerequisites, 30000);
+setInterval(fetchMcpAccounts, 30000);
 
 const providerSelect = document.getElementById("setting-provider");
 const nvidiaSettings = document.getElementById("nvidia-settings");
@@ -583,5 +710,64 @@ if (saveSettingsBtn) {
 
     log("Configuration saved");
     alert("Configuration saved successfully.");
+   };
+}
+
+const accountSelect = document.getElementById("setting-ctrader-account");
+const accountBalanceEl = document.getElementById("ctrader-account-balance");
+
+async function loadAccountSelector() {
+  if (!accountSelect) return;
+  try {
+    const res = await fetch("/api/mcp/accounts");
+    const data = await res.json();
+    accountSelect.innerHTML = '<option value="">-- Select account --</option>';
+    (data.accounts || []).forEach(acc => {
+      const opt = document.createElement("option");
+      opt.value = acc.id;
+      opt.textContent = `login ${acc.login} (id: ${acc.id}) — ${acc.balance ?? 0} ${acc.currency || ""}`;
+      if (acc.id === data.selectedAccountId) opt.selected = true;
+      accountSelect.appendChild(opt);
+    });
+    if (data.selectedBalance != null) {
+      accountBalanceEl.textContent = `Balance: ${data.selectedBalance}`;
+    } else {
+      accountBalanceEl.textContent = "";
+    }
+  } catch (e) {
+    console.error("Failed to load accounts for settings:", e);
+  }
+}
+
+if (accountSelect) {
+  accountSelect.onchange = async () => {
+    const accountId = accountSelect.value;
+    if (!accountId) return;
+    const parsed = parseInt(accountId, 10);
+    try {
+      const res = await fetch("/api/config/ctrader-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: parsed }),
+      });
+      if (res.ok) {
+        selectedAccountId = parsed;
+        log(`Settings: selected cTrader account id ${parsed}`);
+        loadAccountSelector();
+      }
+    } catch (e) {
+      console.error("Failed to set cTrader account:", e);
+    }
   };
 }
+
+document.querySelectorAll(".nav-item").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const section = btn.dataset.section;
+    if (section === "settings" && accountSelect) {
+      loadAccountSelector();
+    }
+  });
+});
+
+loadAccountSelector();

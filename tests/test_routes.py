@@ -31,6 +31,8 @@ def client(temp_db):
     mock_scheduler = MagicMock()
     mock_scheduler.trigger_cycle = AsyncMock()
     mock_scheduler.resolve_pending = MagicMock(return_value=False)
+    mock_scheduler.min_interval_seconds = MagicMock(return_value=300)
+    mock_scheduler.mcp = MagicMock()
     api._state["cfg"] = cfg
     api._state["store"] = store
     api._state["scheduler"] = mock_scheduler
@@ -111,6 +113,70 @@ class TestPrerequisitesEndpoint:
         assert "ok" in data
         assert "ctrader" in data
         assert "mcp" in data
+
+
+class TestMcpAccountsEndpoint:
+    def test_accounts_returns_structure(self, client):
+        scheduler = api._state["scheduler"]
+        scheduler.mcp.get_accounts = AsyncMock(
+            return_value=[
+                {"id": 48131263, "login": 4262699, "balance": 1000.0, "currency": "EUR", "type": "Hedged", "isOnline": False},
+                {"id": 48131264, "login": 4262700, "balance": 500.0, "currency": "USD", "type": "Hedged", "isOnline": True},
+            ]
+        )
+        scheduler.mcp.call = AsyncMock(return_value={"balance": 166.24})
+        scheduler.cfg = {"ctrader_mcp": {"account_id": 48131263}}
+
+        response = client.get("/api/mcp/accounts")
+        assert response.status_code == 200
+        data = response.json()
+        assert "accounts" in data
+        assert len(data["accounts"]) == 2
+        assert data["selectedAccountId"] == 48131263
+        assert data["selectedBalance"] == 166.24
+
+    def test_accounts_no_mcp_returns_empty(self, client):
+        api._state["scheduler"].mcp = None
+        response = client.get("/api/mcp/accounts")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["accounts"] == []
+        assert data["selectedAccountId"] is None
+        assert data["selectedBalance"] is None
+        api._state["scheduler"].mcp = MagicMock()
+
+    def test_accounts_no_selected_balance_when_no_account_id(self, client):
+        scheduler = api._state["scheduler"]
+        scheduler.mcp.get_accounts = AsyncMock(return_value=[{"id": 1, "login": 100}])
+        scheduler.cfg = {"ctrader_mcp": {}}
+
+        response = client.get("/api/mcp/accounts")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["selectedAccountId"] is None
+        assert data["selectedBalance"] is None
+
+
+class TestSetCtraderAccountEndpoint:
+    def test_set_account_success(self, client):
+        scheduler = api._state["scheduler"]
+        response = client.post(
+            "/api/config/ctrader-account",
+            json={"account_id": 48131264},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ctrader_mcp"]["account_id"] == 48131264
+        assert scheduler.mcp.account_id == 48131264
+        assert scheduler.cfg["ctrader_mcp"]["account_id"] == 48131264
+
+    def test_set_account_missing_id_returns_400(self, client):
+        response = client.post(
+            "/api/config/ctrader-account",
+            json={},
+        )
+        assert response.status_code == 400
+        assert response.json()["error"] == "account_id required"
 
 
 class TestIndexRoute:

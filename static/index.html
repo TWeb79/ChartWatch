@@ -15,7 +15,7 @@
         </svg>
         <h1>ChartWatch</h1>
       </div>
-      <span class="version-badge">v2026.08.1</span>
+      <span class="version-badge">v2026.08.2</span>
     </div>
     <div class="header-right">
       <span id="ws-status" class="badge disconnected">WS: connecting...</span>
@@ -195,7 +195,16 @@
                   <input type="number" id="setting-min-sl" value="10">
                 </label>
               </div>
-          </div>
+              <div class="setting-group">
+                <h3>cTrader Account</h3>
+                <label>Active Account
+                  <select id="setting-ctrader-account">
+                    <option value="">-- Select account --</option>
+                  </select>
+                </label>
+                <span id="ctrader-account-balance" class="kpi-hint"></span>
+              </div>
+            </div>
           <button id="save-settings-btn" class="btn-primary" style="margin-top: 20px;">Save Configuration</button>
         </div>
       </section>

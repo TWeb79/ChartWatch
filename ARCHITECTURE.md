@@ -70,6 +70,20 @@ which silently aborted all Start/Stop/WS-log handlers before they could
 reach `fetch(...)`. The WebSocket `log` event now has a working UI consumer
 again.
 
+## Account Selector
+
+When the application starts, the dashboard fetches all available cTrader
+accounts via `GET /api/mcp/accounts` and displays them in a dropdown
+accessible from the MCP status badge in the header. Clicking the badge
+toggles the account list; clicking an account persists the selection via
+`POST /api/config/ctrader-account` (writes `ctrader_mcp.account_id` to
+`config.yaml`).
+
+The scheduler re-reads `account_id` from config before each trade execution
+(`scheduler.py` `_execute`). The `verify_account()` guard in
+`mcp_client.py` checks that the active cTrader session matches the configured
+account; if not, trades are aborted with an error event.
+
 ## External Dependencies
 
 - **Ollama** — Local LLM vision model (e.g., `qwen3.5:9b`) running at `localhost:11434`

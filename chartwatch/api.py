@@ -1,14 +1,15 @@
 from __future__ import annotations
+
 import asyncio
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config as cfg_module
 from . import app_selector, ctrader_check, storage
+from . import config as cfg_module
 from .logger import get_logger, log_event
 from .scheduler import Scheduler
 
@@ -161,6 +162,41 @@ async def mcp_verify():
         return {"error": "MCP client not initialized"}
     result = await scheduler.mcp.verify()
     return result
+
+
+@app.get("/api/mcp/accounts")
+async def mcp_accounts():
+    scheduler = _state.get("scheduler")
+    if not scheduler or not scheduler.mcp:
+        return {"accounts": [], "selectedAccountId": None, "selectedBalance": None}
+    accounts = await scheduler.mcp.get_accounts()
+    account_id = scheduler.cfg.get("ctrader_mcp", {}).get("account_id")
+    selected_balance = None
+    if account_id is not None:
+        try:
+            balance_result = await scheduler.mcp.call("get_balance", {})
+            if isinstance(balance_result, dict):
+                selected_balance = balance_result.get("balance")
+        except Exception:
+            pass
+    return {
+        "accounts": accounts,
+        "selectedAccountId": account_id,
+        "selectedBalance": selected_balance,
+    }
+
+
+@app.post("/api/config/ctrader-account")
+async def set_ctrader_account(request: Request):
+    body = await request.json()
+    account_id = body.get("account_id")
+    if account_id is None:
+        return JSONResponse({"error": "account_id required"}, status_code=400)
+    log_event(log, "api_config_ctrader_account", {"account_id": account_id})
+    cfg = cfg_module.update({"ctrader_mcp": {"account_id": account_id}})
+    _state["scheduler"].cfg = cfg
+    _state["scheduler"].mcp.account_id = account_id
+    return cfg
 
 
 @app.get("/api/health")

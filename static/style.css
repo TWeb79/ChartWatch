@@ -884,3 +884,60 @@ button {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* Account Dropdown */
+.account-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  min-width: 280px;
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.account-dropdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.account-dropdown-item:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+
+.account-dropdown-item.selected {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.account-dropdown-item .account-login {
+  font-weight: 500;
+}
+
+.account-dropdown-item .account-balance {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 12px;
+}
+
+.account-dropdown-refresh {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  font-weight: 500;
+}

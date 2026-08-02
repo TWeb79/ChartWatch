@@ -312,6 +312,7 @@ class Scheduler:
     async def _execute(
         self, cycle_id: int, d: dict[str, Any], position_context: Optional[dict]
     ) -> None:
+        self.mcp.account_id = self.cfg.get("ctrader_mcp", {}).get("account_id")
         if self.mcp.account_id is not None:
             verification = await self.mcp.verify_account()
             if not verification.get("match", False):

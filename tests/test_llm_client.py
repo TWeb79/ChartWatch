@@ -96,7 +96,7 @@ class TestLlmClientDispatch:
             "provider": "ollama",
             "ollama": {"model": "qwen3.5:9b", "host": "http://localhost:11434"},
         }
-        with patch("chartwatch.llm_client.ollama_client.analyze") as mock_analyze:
+        with patch("chartwatch.ollama_client.analyze") as mock_analyze:
             mock_analyze.return_value = {"assessment": "test", "trend_10min": "up", "confidence": 0.5}
             result = llm_client.analyze("/tmp/test.png", None, cfg)
             mock_analyze.assert_called_once()
@@ -114,20 +114,15 @@ class TestLlmClientDispatch:
                 "max_tokens": 8192,
             },
         }
-        with patch("chartwatch.llm_client.nvidia_client.analyze") as mock_analyze:
+        with patch("chartwatch.nvidia_client.analyze") as mock_analyze:
             mock_analyze.return_value = {"assessment": "test", "trend_10min": "down", "confidence": 0.8}
             result = llm_client.analyze("/tmp/test.png", None, cfg)
             mock_analyze.assert_called_once()
             assert result["trend_10min"] == "down"
 
-    def test_unknown_provider_raises(self):
-        cfg = {"provider": "unknown"}
-        with pytest.raises(ValueError, match="Unknown LLM provider"):
-            llm_client.analyze("/tmp/test.png", None, cfg)
-
     def test_default_provider_is_ollama(self):
         cfg = {}
-        with patch("chartwatch.llm_client.ollama_client.analyze") as mock_analyze:
+        with patch("chartwatch.ollama_client.analyze") as mock_analyze:
             mock_analyze.return_value = {"assessment": "test", "trend_10min": "sideways", "confidence": 0.5}
             result = llm_client.analyze("/tmp/test.png", None, cfg)
             mock_analyze.assert_called_once()
@@ -139,9 +134,9 @@ class TestLlmClientDispatch:
             "llm_model": "custom-model:latest",
             "ollama": {"model": "qwen3.5:9b", "host": "http://localhost:11434"},
         }
-        with patch("chartwatch.llm_client.ollama_client.analyze") as mock_analyze:
+        with patch("chartwatch.ollama_client.analyze") as mock_analyze:
             mock_analyze.return_value = {"assessment": "test", "trend_10min": "up", "confidence": 0.5}
-            result = llm_client.analyze("/tmp/test.png", None, cfg)
+            llm_client.analyze("/tmp/test.png", None, cfg)
             call_kwargs = mock_analyze.call_args
             assert call_kwargs.kwargs.get("model") == "custom-model:latest"
 
@@ -158,8 +153,13 @@ class TestLlmClientDispatch:
                 "max_tokens": 8192,
             },
         }
-        with patch("chartwatch.llm_client.nvidia_client.analyze") as mock_analyze:
+        with patch("chartwatch.nvidia_client.analyze") as mock_analyze:
             mock_analyze.return_value = {"assessment": "test", "trend_10min": "up", "confidence": 0.5}
-            result = llm_client.analyze("/tmp/test.png", None, cfg)
+            llm_client.analyze("/tmp/test.png", None, cfg)
             call_kwargs = mock_analyze.call_args
             assert call_kwargs.kwargs.get("model") == "custom-nvidia-model"
+
+    def test_unknown_provider_raises(self):
+        cfg = {"provider": "unknown"}
+        with pytest.raises(ValueError, match="Unknown LLM provider"):
+            llm_client.analyze("/tmp/test.png", None, cfg)

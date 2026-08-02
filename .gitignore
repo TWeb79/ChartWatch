@@ -12,3 +12,5 @@ __pycache__/
 chartwatch.db
 debug.log
 config.yaml
+config.yaml.test_backup
+.kilo/

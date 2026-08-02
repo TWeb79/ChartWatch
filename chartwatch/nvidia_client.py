@@ -9,10 +9,13 @@ Version: 1.0.0  (deployment: 2026-08-01)
 """
 
 from __future__ import annotations
+
 import base64
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+
+from openai import OpenAI
 
 from .logger import get_logger, log_event
 
@@ -62,7 +65,7 @@ def _encode_image(path: str) -> str:
 
 def analyze(
     screenshot_path: str,
-    position_context: Optional[dict[str, Any]],
+    position_context: dict[str, Any] | None,
     model: str,
     api_key: str,
     base_url: str,
@@ -71,8 +74,6 @@ def analyze(
     max_tokens: int,
     instruction_file: str = "",
 ) -> dict[str, Any]:
-    from openai import OpenAI
-
     log_event(log, "nvidia_analyze_start", {
         "screenshot": screenshot_path,
         "model": model,

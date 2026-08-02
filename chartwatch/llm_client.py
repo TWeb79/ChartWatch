@@ -44,7 +44,7 @@ def analyze(
         return ollama_client.analyze(
             screenshot_path=screenshot_path,
             position_context=position_context,
-            model=ollama_cfg.get("model", model),
+            model=model,
             host=ollama_cfg.get("host", "http://localhost:11434"),
             instruction_file=ollama_cfg.get("instruction_file", instruction_file),
         )
@@ -56,7 +56,7 @@ def analyze(
         return nvidia_client.analyze(
             screenshot_path=screenshot_path,
             position_context=position_context,
-            model=nvidia_cfg.get("model", model),
+            model=model,
             api_key=nvidia_cfg.get("api_key", ""),
             base_url=nvidia_cfg.get("base_url", "https://integrate.api.nvidia.com/v1"),
             temperature=nvidia_cfg.get("temperature", 1),

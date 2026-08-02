@@ -6,13 +6,12 @@ via list_tools(), and a TOOL_NAMES mapping for logical-to-actual tool name
 resolution with automatic fallback matching.
 
 Author: Inventions4All - github:TWeb79
-Version: 1.0.0  (deployment: 2026-08-01)
+Version: 1.1.0  (deployment: 2026-08-02)
 """
 
 from __future__ import annotations
 
 import json
-import logging
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -272,6 +271,13 @@ class CTraderMCPClient:
         except Exception as e:
             result["error"] = str(e)
         return result
+
+    async def get_accounts(self) -> list[dict[str, Any]]:
+        """Fetch all available cTrader accounts."""
+        raw = await self.call("get_accounts_list", {})
+        if isinstance(raw, dict):
+            return raw.get("accounts", [])
+        return []
 
     async def verify_account(self) -> dict[str, Any]:
         """Verify the active cTrader account matches the expected account_id.
