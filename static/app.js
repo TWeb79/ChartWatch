@@ -44,30 +44,45 @@ let lastHistoryData = "";
 let prerequisitesOk = false;
 let currentProvider = "ollama";
 
-async function fetchPrerequisites() {
+async function fetchSystemStatus() {
   try {
     const res = await fetch("/api/health/prerequisites");
     const data = await res.json();
     prerequisitesOk = data.ok || false;
     updatePrerequisitesUI(data);
+
+    if (data.mcp?.reachable) {
+      await fetchMcpAccounts();
+    }
     return data;
   } catch (e) {
-    console.error("Failed to fetch prerequisites:", e);
+    console.error("Failed to fetch system status:", e);
     prerequisitesOk = false;
+    updateMcpStatus(false);
     return { ok: false, ctrader: { running: false }, mcp: { reachable: false } };
   }
 }
 
 function updatePrerequisitesUI(data) {
   const ctraderEl = document.getElementById("prereq-ctrader");
-  const mcpEl = document.getElementById("prereq-mcp");
-  if (ctraderEl) {
-    ctraderEl.textContent = data.ctrader?.running ? "cTrader: running" : "cTrader: not running";
-    ctraderEl.className = "badge " + (data.ctrader?.running ? "connected" : "disconnected");
-  }
-  if (mcpEl) {
-    mcpEl.textContent = data.mcp?.reachable ? "MCP: reachable" : "MCP: unreachable";
-    mcpEl.className = "badge " + (data.mcp?.reachable ? "connected" : "disconnected");
+  if (!ctraderEl) return;
+
+  const mcpReachable = data.mcp?.reachable || false;
+
+  if (mcpReachable) {
+    // MCP is up — cTrader is implied to be running, hide the badge
+    ctraderEl.classList.add("hidden");
+  } else {
+    // MCP is down — check if cTrader process is running
+    ctraderEl.classList.remove("hidden");
+    const ctraderRunning = data.ctrader?.running || false;
+    if (ctraderRunning) {
+      ctraderEl.textContent = "cTrader: running (MCP unreachable)";
+      ctraderEl.className = "badge checking";
+    } else {
+      ctraderEl.textContent = "cTrader: not running — start cTrader to enable MCP";
+      ctraderEl.className = "badge disconnected";
+    }
   }
 }
 
@@ -237,12 +252,19 @@ autoApproveToggle.onchange = () => {
 };
 
 startBtn.onclick = async () => {
-  log("Checking prerequisites...");
-  const prereq = await fetchPrerequisites();
+  log("Checking system status...");
+  const prereq = await fetchSystemStatus();
   if (!prereq.ok) {
     const reasons = [];
-    if (!prereq.ctrader?.running) reasons.push("cTrader is not running");
-    if (!prereq.mcp?.reachable) reasons.push("MCP server is not reachable");
+    if (!prereq.mcp?.reachable) {
+      if (!prereq.ctrader?.running) {
+        reasons.push("cTrader is not running — launch cTrader to enable the MCP server");
+      } else {
+        reasons.push("cTrader is running but MCP server is not reachable");
+      }
+    } else {
+      reasons.push("System not ready");
+    }
     const msg = reasons.join("; ") + " — cannot start cycle.";
     log(msg);
     alert(msg);
@@ -589,6 +611,9 @@ function connectWs() {
     if (type === "log") {
       log(payload.message);
     }
+    if (type === "error") {
+      log(`⚠ ${payload.message}`);
+    }
     if (type === "model_response") {
       try {
         const parsed = typeof payload.response === "string" ? JSON.parse(payload.response) : payload.response;
@@ -607,7 +632,7 @@ function connectWs() {
         lastCaptureTime = now;
       }
     }
-     if (type === "mcp_connect_ok") {
+    if (type === "mcp_connect_ok") {
       updateMcpStatus(true, { login: selectedAccountLogin });
     }
     if (type === "mcp_connect_retry" || type === "mcp_call_error") {
@@ -644,10 +669,8 @@ document.getElementById("ollama-screenshot-close").onclick = hideOllamaOverlay;
 loadWindows();
 loadHistory();
 updateIntervalHint();
-fetchPrerequisites();
-fetchMcpAccounts();
-setInterval(fetchPrerequisites, 30000);
-setInterval(fetchMcpAccounts, 30000);
+fetchSystemStatus();
+setInterval(fetchSystemStatus, 30000);
 
 const providerSelect = document.getElementById("setting-provider");
 const nvidiaSettings = document.getElementById("nvidia-settings");

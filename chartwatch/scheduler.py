@@ -44,6 +44,7 @@ class Scheduler:
         self._loop = asyncio.get_running_loop()
         self._ollama_times: list[float] = []
         self._ollama_window = 10
+        self._ctrader_alerted = False
 
     async def start(self):
         self._running = True
@@ -76,24 +77,35 @@ class Scheduler:
 
         try:
             while self._running:
-                ctrader_status = ctrader_check.check_ctrader_running()
-                if not ctrader_status.get("running"):
-                    await self.on_event("error", {
-                        "message": "cTrader not started — please launch cTrader before running cycles"
-                    })
-                    log_event(log, "ctrader_not_running", ctrader_status)
-                    await asyncio.sleep(10)
-                    continue
-
+                # If MCP session is active, cTrader is implied to be running.
+                # Only check the cTrader process when MCP is unreachable,
+                # since the MCP server is provided by cTrader.
                 if not self.mcp.session:
                     try:
                         await self.mcp.connect()
+                        self._ctrader_alerted = False
                     except Exception as e:
-                        await self.on_event("error", {
-                            "message": f"MCP reconnection failed: {e}"
-                        })
-                        await asyncio.sleep(5)
-                        continue
+                        # MCP connection failed — check if cTrader is running
+                        ctrader_status = ctrader_check.check_ctrader_running()
+                        if not ctrader_status.get("running"):
+                            if not self._ctrader_alerted:
+                                await self.on_event("error", {
+                                    "message": "cTrader not started — please launch cTrader to enable the MCP server"
+                                })
+                                log_event(log, "ctrader_not_running", ctrader_status)
+                                self._ctrader_alerted = True
+                            await asyncio.sleep(10)
+                            continue
+                        else:
+                            if self._ctrader_alerted:
+                                log_event(log, "ctrader_back_up", ctrader_status)
+                                self._ctrader_alerted = False
+                            await self.on_event("error", {
+                                "message": f"MCP connection failed: {e}"
+                            })
+                            await asyncio.sleep(5)
+                            continue
+
                 try:
                     await self._run_cycle()
                 except Exception as e:
@@ -142,25 +154,26 @@ class Scheduler:
     async def trigger_cycle(self):
         """Run a single cycle immediately without waiting for the interval."""
         try:
-            ctrader_status = ctrader_check.check_ctrader_running()
-            if not ctrader_status.get("running"):
-                await self.on_event("error", {
-                    "message": "cTrader not started — please launch cTrader before running cycles"
-                })
-                log_event(log, "ctrader_not_running", ctrader_status)
-                return
-
             if not self.mcp.session:
                 max_retries = 3
                 delay = 1.0
                 for attempt in range(1, max_retries + 1):
                     try:
                         await self.mcp.connect()
+                        self._ctrader_alerted = False
                         break
                     except Exception as e:
                         if attempt == max_retries:
+                            # MCP connection failed — check if cTrader is running
+                            ctrader_status = ctrader_check.check_ctrader_running()
+                            if not ctrader_status.get("running"):
+                                raise RuntimeError(
+                                    "cTrader not started — please launch cTrader "
+                                    "to enable the MCP server"
+                                ) from e
                             raise RuntimeError(
-                                f"Failed to connect to MCP server after {max_retries} attempts: {e}"
+                                f"Failed to connect to MCP server after {max_retries} "
+                                f"attempts: {e}"
                             ) from e
                         await asyncio.sleep(delay)
                         delay = min(delay * 2, 30.0)
