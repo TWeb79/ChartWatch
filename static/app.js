@@ -4,6 +4,7 @@ const intervalInput = document.getElementById("interval-input");
 const intervalMinHint = document.getElementById("interval-min-hint");
 const autoApproveToggle = document.getElementById("auto-approve-toggle");
 const historyBody = document.querySelector("#history-table tbody");
+const historyBodySummary = document.querySelector("#history-table-summary tbody");
 const startBtn = document.getElementById("start-cycle-btn");
 const stopBtn = document.getElementById("stop-cycle-btn");
 const statusEl = document.getElementById("scheduler-status");
@@ -294,7 +295,7 @@ denyBtn.onclick = () => {
   hideApproval();
 };
 
-function addHistoryRow(row) {
+function addHistoryRow(row, targetBody) {
   const tr = document.createElement("tr");
   const ts = row.ts ? new Date(row.ts * 1000).toLocaleTimeString() : "-";
   const cycleId = row.id ?? "-";
@@ -363,8 +364,8 @@ function addHistoryRow(row) {
     };
   }
 
-  historyBody.append(detailsTr);
-  historyBody.append(tr);
+  targetBody.append(detailsTr);
+  targetBody.append(tr);
 }
 
 async function loadHistory() {
@@ -375,7 +376,8 @@ async function loadHistory() {
     return;
   }
   lastHistoryData = dataKey;
-  historyBody.innerHTML = "";
+  if (historyBody) historyBody.innerHTML = "";
+  if (historyBodySummary) historyBodySummary.innerHTML = "";
   rows.forEach(r => {
     let response = {};
     try { response = JSON.parse(r.model_response || "{}"); } catch (e) {}
@@ -394,7 +396,21 @@ async function loadHistory() {
       guardrail_status: r.guardrail_status,
       guardrail_reason: r.guardrail_reason,
       mcp_result: mcpResult,
-    });
+    }, historyBody);
+    addHistoryRow({
+      id: r.id,
+      ts: r.ts,
+      screenshot_path: r.screenshot_path,
+      trend: response.trend_10min,
+      confidence: response.confidence,
+      assessment: response.assessment,
+      action: response.open_position_action || (response.new_trade ? "new_trade" : "-"),
+      new_trade: response.new_trade,
+      status: r.action_status,
+      guardrail_status: r.guardrail_status,
+      guardrail_reason: r.guardrail_reason,
+      mcp_result: mcpResult,
+    }, historyBodySummary);
   });
 }
 

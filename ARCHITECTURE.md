@@ -63,6 +63,13 @@ Each cycle:
   9. Results stored in SQLite
 ```
 
+Note: The `#log` element (`<pre id="log" class="log-area">`) was restored in
+`static/index.html` after it was accidentally removed during a dashboard
+redesign. Its absence caused `log()` in `app.js` to throw on every call,
+which silently aborted all Start/Stop/WS-log handlers before they could
+reach `fetch(...)`. The WebSocket `log` event now has a working UI consumer
+again.
+
 ## External Dependencies
 
 - **Ollama** — Local LLM vision model (e.g., `qwen3.5:9b`) running at `localhost:11434`

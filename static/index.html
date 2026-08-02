@@ -15,7 +15,7 @@
         </svg>
         <h1>ChartWatch</h1>
       </div>
-      <span class="version-badge">v2026.08</span>
+      <span class="version-badge">v2026.08.1</span>
     </div>
     <div class="header-right">
       <span id="ws-status" class="badge disconnected">WS: connecting...</span>
@@ -72,11 +72,15 @@
          <span id="health-mcp" class="badge checking">MCP: checking...</span>
          <span id="health-ollama" class="badge checking">Ollama: checking...</span>
        </div>
-       <div class="prereq-bar">
-         <span id="prereq-ctrader" class="badge checking">cTrader: checking...</span>
-         <span id="prereq-mcp" class="badge checking">MCP: checking...</span>
-       </div>
-            <div id="setup-body" class="setup-body">
+        <div class="prereq-bar">
+          <span id="prereq-ctrader" class="badge checking">cTrader: checking...</span>
+          <span id="prereq-mcp" class="badge checking">MCP: checking...</span>
+        </div>
+        <div class="card-subsection">
+          <h3>Activity Log</h3>
+          <pre id="log" class="log-area"></pre>
+        </div>
+             <div id="setup-body" class="setup-body">
               <label>Target Window
                 <select id="window-select"></select>
                  <button id="refresh-windows" class="btn-ghost">Refresh</button>
@@ -108,7 +112,7 @@
 
           <div class="card">
             <h2>Cycle History</h2>
-            <table id="history-table">
+            <table id="history-table-summary" class="history-table">
               <thead>
                 <tr>
                   <th></th>
@@ -129,7 +133,7 @@
       <section id="section-history" class="section">
         <div class="card">
           <h2>Cycle History</h2>
-          <table id="history-table">
+          <table id="history-table" class="history-table">
             <thead>
               <tr>
                 <th></th>

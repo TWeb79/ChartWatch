@@ -607,13 +607,13 @@ button {
 }
 
 /* History Table */
-#history-table {
+.history-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
 }
 
-#history-table th {
+.history-table th {
   text-align: left;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
@@ -624,7 +624,7 @@ button {
   letter-spacing: 0.05em;
 }
 
-#history-table td {
+.history-table td {
   padding: 12px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
