@@ -43,7 +43,7 @@ class Scheduler:
         self._running = False
         self._loop = asyncio.get_running_loop()
         self._ollama_times: list[float] = []
-        self._ollama_window = 10
+        self._ollama_window = cfg.get("scheduler", {}).get("ollama_timing_window", 10)
         self._ctrader_alerted = False
         # Track position IDs that were closed locally to filter stale MCP results
         # (cTrader MCP may return cached/stale positions for a short period)
@@ -57,9 +57,9 @@ class Scheduler:
                 f"interval_minutes must be >= 1, got {interval}"
             )
 
-        max_retries = 5
-        delay = 1.0
-        max_delay = 30.0
+        max_retries = self.cfg.get("scheduler", {}).get("mcp_max_retries", 5)
+        delay = self.cfg.get("scheduler", {}).get("mcp_retry_delay", 1.0)
+        max_delay = self.cfg.get("scheduler", {}).get("mcp_retry_max_delay", 30.0)
         for attempt in range(1, max_retries + 1):
             try:
                 await self.mcp.connect()
@@ -161,8 +161,8 @@ class Scheduler:
         """Run a single cycle immediately without waiting for the interval."""
         try:
             if not self.mcp.session:
-                max_retries = 3
-                delay = 1.0
+                max_retries = self.cfg.get("scheduler", {}).get("mcp_max_retries", 3)
+                delay = self.cfg.get("scheduler", {}).get("mcp_retry_delay", 1.0)
                 for attempt in range(1, max_retries + 1):
                     try:
                         await asyncio.wait_for(self.mcp.connect(), timeout=15.0)
@@ -183,7 +183,7 @@ class Scheduler:
                                 f"attempts: {e}"
                             ) from e
                         await asyncio.sleep(delay)
-                        delay = min(delay * 2, 30.0)
+                        delay = min(delay * 2, self.cfg.get("scheduler", {}).get("mcp_retry_max_delay", 30.0))
             await self._run_cycle()
         except Exception as e:
             await self.on_event("error", {"message": str(e)})
@@ -362,7 +362,7 @@ class Scheduler:
                     })
 
         try:
-            pip_size = cfg.get("trading", {}).get("pip_size", 0.0001)
+            pip_size = cfg.get("trading", {}).get("pip_size", 0.1)
             log_event(log, "guardrail_check", {"cycle_id": cycle_id, "pip_size": pip_size, "current_price": current_price})
             guardrails.check(
                 d,
@@ -371,7 +371,7 @@ class Scheduler:
                 daily_pnl_pct=self.store.daily_pnl_pct(
                     account_value=account_balance.get("balance")
                     if account_balance and account_balance.get("balance")
-                    else cfg.get("trading", {}).get("account_value", 0.0)
+                    else cfg.get("trading", {}).get("account_value", 10000.0)
                 ),
                 limits=cfg["risk_limits"],
                 pip_size=pip_size,
@@ -530,8 +530,9 @@ class Scheduler:
 
             # --- Position sizing based on free margin and leverage ---
             # Formula: volume = (free_margin * leverage) / symbol_price
-            # Leverage is 30x. If calculated volume < 0.1 (minimum), skip trade.
-            leverage = 30
+            # Leverage is read from config. If calculated volume < min_volume, skip trade.
+            leverage = self.cfg.get("scheduler", {}).get("leverage", 30)
+            min_volume = self.cfg.get("scheduler", {}).get("min_volume", 0.1)
             free_margin = await self.mcp.get_free_margin()
             symbol_price = await self.mcp.get_symbol_price(symbol)
             max_position_size = self.cfg.get("risk_limits", {}).get("max_position_size", 0.5)
@@ -554,21 +555,21 @@ class Scheduler:
                     "formula": f"({free_margin} * {leverage}) / {symbol_price}",
                 })
 
-                if calculated_volume < 0.1:
+                if calculated_volume < min_volume:
                     log_event(log, "trade_skipped_insufficient_margin", {
                         "cycle_id": cycle_id,
                         "symbol": symbol,
                         "free_margin": free_margin,
                         "symbol_price": symbol_price,
                         "calculated_volume": round(calculated_volume, 4),
-                        "minimum_volume": 0.1,
-                        "message": "Calculated volume below minimum (0.1) — trade skipped",
+                        "minimum_volume": min_volume,
+                        "message": f"Calculated volume below minimum ({min_volume}) — trade skipped",
                     })
                     await self.on_event("log", {
                         "cycle_id": cycle_id,
                         "message": (
                             f"Trade skipped: calculated volume {calculated_volume:.4f} "
-                            f"below minimum 0.1 (free_margin={free_margin}, "
+                            f"below minimum {min_volume} (free_margin={free_margin}, "
                             f"price={symbol_price})"
                         ),
                     })

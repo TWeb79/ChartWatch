@@ -71,6 +71,7 @@ def analyze(
     instruction_file: str = "",
     account_balance: Optional[dict[str, Any]] = None,
     timeout: float = 120.0,
+    temperature: float = 0.2,
     system_prompt: str = SYSTEM_PROMPT,
 ) -> dict[str, Any]:
     """Analyze a screenshot using the Ollama vision model.
@@ -85,6 +86,7 @@ def analyze(
             for the configured cTrader account, included in the prompt
             so the model can suggest appropriate position sizing.
         timeout: Maximum seconds to wait for the Ollama response.
+        temperature: Sampling temperature (from config.yaml defaults).
         system_prompt: System prompt override; defaults to the module-level
             ``SYSTEM_PROMPT``. If the config provides an ``ollama.prompt``
             field, that value is used instead for richer instructions.
@@ -140,7 +142,7 @@ def analyze(
                 },
             ],
             format="json",
-            options={"temperature": 0.2},
+            options={"temperature": temperature},
         )
     except Exception as e:
         error_msg = str(e)

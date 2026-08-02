@@ -513,9 +513,23 @@ class CTraderMCPClient:
             The current ask price as a float, or ``None`` if the price
             cannot be retrieved.
         """
+        if not isinstance(symbol, str) or not symbol.strip():
+            log_event(log, "mcp_price_missing_symbol", {"symbol": symbol})
+            return None
+
+        symbol = symbol.strip()
         if not await self._ensure_connected():
             return None
-        raw = await self.call("get_symbol_price", {"symbol": symbol})
+
+        actual_name = self._resolved_tools.get("get_symbol_price")
+        if actual_name is None:
+            actual_name = _find_tool_name("get_symbol_price", self.available_tools)
+
+        arguments: dict[str, Any] = {"symbol": symbol}
+        if actual_name is not None and "spot" in actual_name.lower():
+            arguments = {"symbolName": symbol}
+
+        raw = await self.call("get_symbol_price", arguments)
 
         # Format 1: direct dict with ask/bid
         if isinstance(raw, dict):

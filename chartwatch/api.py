@@ -37,7 +37,7 @@ _ws_lock = asyncio.Lock()
 _filtered_llm_models: dict[str, Any] = {}
 
 # Rate-limiting: prevent rapid re-calling of /api/llm/models/test
-# (which triggers a provider API call). Min 30 seconds between manual tests.
+# (which triggers a provider API call). Min interval from config.
 _last_model_test_time: float = 0.0
 MODEL_TEST_MIN_INTERVAL_S: float = 30.0
 
@@ -509,9 +509,11 @@ async def llm_models_test():
     prevent accidental provider API flooding (DDOS protection).
     """
     global _last_model_test_time
+    cfg = cfg_module.load()
+    min_interval_s = cfg.get("server", {}).get("model_test_min_interval_s", 30.0)
     now = time.monotonic()
-    if now - _last_model_test_time < MODEL_TEST_MIN_INTERVAL_S:
-        remaining = round(MODEL_TEST_MIN_INTERVAL_S - (now - _last_model_test_time), 1)
+    if now - _last_model_test_time < min_interval_s:
+        remaining = round(min_interval_s - (now - _last_model_test_time), 1)
         return JSONResponse(
             {"error": f"Rate limited. Try again in {remaining}s.",
              "next_test_in_s": remaining},

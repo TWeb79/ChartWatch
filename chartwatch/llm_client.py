@@ -66,6 +66,7 @@ def analyze(
             instruction_file=ollama_cfg.get("instruction_file", instruction_file),
             account_balance=account_balance,
             timeout=timeout,
+            temperature=ollama_cfg.get("temperature", 0.2),
             system_prompt=ollama_cfg.get("prompt", ""),
         )
 

@@ -24,7 +24,7 @@ def check(
     open_positions_count: int,
     daily_pnl_pct: float,
     limits: dict[str, Any],
-    pip_size: float = 0.0001,
+    pip_size: float,
 ) -> None:
     """Raises GuardrailRejection with a human-readable reason, or returns None."""
 
