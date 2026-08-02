@@ -342,6 +342,7 @@ class CTraderMCPClient:
             "symbol": symbol,
             "direction": direction,
             "volume": volume,
+            "volumeType": "Lots",
             "stop_loss": sl,
             "take_profit": tp,
         })
