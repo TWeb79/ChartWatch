@@ -20,6 +20,7 @@ const approveBtn = document.getElementById("approve-btn");
 const denyBtn = document.getElementById("deny-btn");
 
 const wsStatusEl = document.getElementById("ws-status");
+const ctraderStatusEl = document.getElementById("ctrader-status");
 const mcpStatusEl = document.getElementById("mcp-status");
 const kpiNextCycle = document.getElementById("kpi-next-cycle");
 const kpiConfidence = document.getElementById("kpi-confidence");
@@ -64,23 +65,23 @@ async function fetchSystemStatus() {
 }
 
 function updatePrerequisitesUI(data) {
-  const ctraderEl = document.getElementById("prereq-ctrader");
+  const ctraderEl = document.getElementById("ctrader-status");
   if (!ctraderEl) return;
 
   const mcpReachable = data.mcp?.reachable || false;
 
   if (mcpReachable) {
-    // MCP is up — cTrader is implied to be running, hide the badge
-    ctraderEl.classList.add("hidden");
+    // MCP is up — cTrader is implied to be running
+    ctraderEl.textContent = "cTrader: connected";
+    ctraderEl.className = "badge connected";
   } else {
-    // MCP is down — check if cTrader process is running
-    ctraderEl.classList.remove("hidden");
+    // MCP is down — show cTrader process status to help diagnose
     const ctraderRunning = data.ctrader?.running || false;
     if (ctraderRunning) {
       ctraderEl.textContent = "cTrader: running (MCP unreachable)";
       ctraderEl.className = "badge checking";
     } else {
-      ctraderEl.textContent = "cTrader: not running — start cTrader to enable MCP";
+      ctraderEl.textContent = "cTrader: not running — start cTrader";
       ctraderEl.className = "badge disconnected";
     }
   }

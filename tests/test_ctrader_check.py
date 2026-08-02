@@ -21,6 +21,17 @@ class TestCheckCTraderRunning:
             result = ctrader_check.check_ctrader_running()
             assert result["running"] is False
 
+    def test_ctrader_running_uses_partial_match(self):
+        """Verify pgrep is called with -f (partial match) to find cTrader.Mac."""
+        with patch("chartwatch.ctrader_check.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "12345\n"
+            ctrader_check.check_ctrader_running()
+            args = mock_run.call_args[0][0]
+            assert args[0] == "pgrep"
+            assert "-f" in args
+            assert "cTrader" in args
+
     def test_ctrader_running_handles_exception(self):
         with patch("chartwatch.ctrader_check.subprocess.run") as mock_run:
             mock_run.side_effect = Exception("pgrep failed")
@@ -58,12 +69,25 @@ class TestCheckPrerequisites:
                 assert result["ctrader"]["running"] is True
                 assert result["mcp"]["reachable"] is True
 
-    def test_ctrader_not_running(self):
+    def test_ctrader_not_running_when_mcp_down(self):
+        """When MCP is unreachable and cTrader is not running, ok=False."""
         cfg = {"ctrader_mcp": {"url": "http://127.0.0.1:9876/mcp/"}}
         with patch.object(ctrader_check, "check_ctrader_running", return_value={"running": False}):
-            with patch.object(ctrader_check, "check_mcp_available", return_value={"reachable": True}):
+            with patch.object(ctrader_check, "check_mcp_available", return_value={"reachable": False}):
                 result = ctrader_check.check_prerequisites(cfg)
                 assert result["ok"] is False
+                assert result["ctrader"]["running"] is False
+
+    def test_ctrader_implied_running_when_mcp_up(self):
+        """When MCP is reachable, cTrader is implied running (process not checked)."""
+        cfg = {"ctrader_mcp": {"url": "http://127.0.0.1:9876/mcp/"}}
+        with patch.object(ctrader_check, "check_ctrader_running", return_value={"running": False}) as mock_ctrader:
+            with patch.object(ctrader_check, "check_mcp_available", return_value={"reachable": True}):
+                result = ctrader_check.check_prerequisites(cfg)
+                assert result["ok"] is True
+                # cTrader process check should NOT be called when MCP is reachable
+                mock_ctrader.assert_not_called()
+                assert result["ctrader"]["implied"] is True
 
     def test_mcp_not_reachable(self):
         cfg = {"ctrader_mcp": {"url": "http://127.0.0.1:9876/mcp/"}}

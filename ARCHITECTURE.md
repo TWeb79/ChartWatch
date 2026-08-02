@@ -72,11 +72,13 @@ again.
 
 ## Status Check Flow
 
+The header contains three status badges: WebSocket connection (`#ws-status`), cTrader process (`#ctrader-status`), and MCP server (`#mcp-status`) with clickable account dropdown.
+
 The dashboard and scheduler use a consolidated status check approach:
 
-1. **`GET /api/health/prerequisites`** (via `ctrader_check.check_prerequisites`) checks both cTrader process and MCP reachability
-2. If MCP is reachable, the cTrader process check is redundant (the MCP server is provided by cTrader) — the dashboard hides the cTrader badge
-3. If MCP is not reachable, the dashboard shows the cTrader process status and prompts the user to launch cTrader
+1. **`GET /api/health/prerequisites`** (via `ctrader_check.check_prerequisites`) checks MCP reachability first
+2. If MCP is reachable, cTrader is implied to be running (the MCP server is provided by cTrader) — the cTrader badge shows "connected" and the process check is skipped
+3. If MCP is not reachable, the cTrader process is checked via `pgrep -f "cTrader"` — the badge shows "running (MCP unreachable)" or "not running — start cTrader"
 4. The scheduler (`scheduler.py`) mirrors this logic: it attempts MCP connection first, and only checks the cTrader process when MCP connection fails. A `_ctrader_alerted` flag prevents repeated error broadcasts when cTrader remains down.
 
 WebSocket `error` events are displayed in the Activity Log with a `⚠` prefix.

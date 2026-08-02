@@ -17,14 +17,17 @@ from typing import Any
 def check_ctrader_running() -> dict[str, Any]:
     """Check whether the cTrader application process is running on macOS.
 
-    Uses ``pgrep`` to look for a process named ``cTrader``.
+    Uses ``pgrep`` to look for a process matching ``cTrader``. On macOS
+    the actual process name is ``cTrader.Mac`` (the executable inside the
+    .app bundle), so a partial match via ``-f`` is used instead of exact
+    match (``-x``).
 
     Returns:
         Dict with ``running`` (bool) and ``process_name`` (str).
     """
     try:
         result = subprocess.run(
-            ["pgrep", "-x", "cTrader"],
+            ["pgrep", "-f", "cTrader"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -61,8 +64,11 @@ def check_prerequisites(cfg: dict[str, Any]) -> dict[str, Any]:
     """Run all prerequisite checks and return a combined status.
 
     Checks:
-    1. cTrader process is running.
-    2. MCP server endpoint is reachable.
+    1. MCP server endpoint is reachable.
+    2. If MCP is reachable, cTrader is implied to be running (the MCP
+       server is provided by cTrader), so the process check is skipped.
+    3. If MCP is NOT reachable, check if the cTrader process is running
+       to help the user diagnose the issue.
 
     Args:
         cfg: Application configuration dict (must contain
@@ -70,11 +76,18 @@ def check_prerequisites(cfg: dict[str, Any]) -> dict[str, Any]:
 
     Returns:
         Dict with ``ctrader`` and ``mcp`` sub-dicts and an overall
-        ``ok`` boolean.
+        ``ok`` boolean.  ``ok`` is ``True`` when MCP is reachable (cTrader
+        is implied).
     """
-    ctrader = check_ctrader_running()
     mcp_url = cfg.get("ctrader_mcp", {}).get("url", "")
     mcp = check_mcp_available(mcp_url) if mcp_url else {"reachable": False, "url": "", "error": "no MCP URL configured"}
 
-    ok = ctrader.get("running", False) and mcp.get("reachable", False)
+    # Only check the cTrader process when MCP is unreachable, since the
+    # MCP server is provided by cTrader — if MCP is up, cTrader is running.
+    if mcp.get("reachable", False):
+        ctrader = {"running": True, "process_name": "cTrader", "implied": True}
+    else:
+        ctrader = check_ctrader_running()
+
+    ok = mcp.get("reachable", False)
     return {"ok": ok, "ctrader": ctrader, "mcp": mcp}
