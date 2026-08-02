@@ -35,7 +35,10 @@ class Scheduler:
         self.cfg = cfg
         self.store = store
         self.on_event = on_event  # async callback(event_type: str, payload: dict)
-        self.mcp = CTraderMCPClient(cfg["ctrader_mcp"]["url"])
+        self.mcp = CTraderMCPClient(
+            cfg["ctrader_mcp"]["url"],
+            account_id=cfg["ctrader_mcp"].get("account_id"),
+        )
         self.pending: Optional[PendingApproval] = None
         self._running = False
         self._loop = asyncio.get_running_loop()
@@ -309,6 +312,26 @@ class Scheduler:
     async def _execute(
         self, cycle_id: int, d: dict[str, Any], position_context: Optional[dict]
     ) -> None:
+        if self.mcp.account_id is not None:
+            verification = await self.mcp.verify_account()
+            if not verification.get("match", False):
+                log_event(log, "mcp_account_mismatch", verification)
+                self.store.set_action(
+                    cycle_id,
+                    "error",
+                    mcp_result={"error": "account mismatch", "details": verification},
+                )
+                await self.on_event(
+                    "error",
+                    {
+                        "cycle_id": cycle_id,
+                        "error": f"cTrader account mismatch: expected "
+                        f"account_id {self.mcp.account_id}, "
+                        f"got {verification}",
+                    },
+                )
+                return
+
         open_position_action = d.get("open_position_action")
         new_trade = d.get("new_trade")
 

@@ -113,8 +113,9 @@ def _parse_json_text(text: str) -> Any:
 class CTraderMCPClient:
     """Thin wrapper around an MCP ClientSession talking to the cTrader MCP server."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, account_id: int | None = None) -> None:
         self.url = url
+        self.account_id = account_id
         self._stack = AsyncExitStack()
         self.session: ClientSession | None = None
         self.available_tools: dict[str, Any] = {}
@@ -271,6 +272,35 @@ class CTraderMCPClient:
         except Exception as e:
             result["error"] = str(e)
         return result
+
+    async def verify_account(self) -> dict[str, Any]:
+        """Verify the active cTrader account matches the expected account_id.
+
+        Returns a dict with 'match' (bool), 'active_login', 'active_id',
+        and 'expected_login' / 'expected_id' for diagnostics.
+        """
+        if self.account_id is None:
+            return {"match": False, "error": "no account_id configured"}
+        try:
+            accounts = await self.call("get_accounts_list", {})
+            account_list = accounts.get("accounts", []) if isinstance(accounts, dict) else []
+            for acc in account_list:
+                if acc.get("id") == self.account_id:
+                    balance = await self.call("get_balance", {})
+                    return {
+                        "match": True,
+                        "active_id": acc["id"],
+                        "active_login": acc.get("login"),
+                        "active_balance": balance.get("balance"),
+                        "expected_id": self.account_id,
+                    }
+            return {
+                "match": False,
+                "error": f"account_id {self.account_id} not found in active accounts",
+                "available": [{"id": a["id"], "login": a.get("login")} for a in account_list],
+            }
+        except Exception as e:
+            return {"match": False, "error": str(e)}
 
     async def disconnect(self) -> None:
         """Disconnect and reset state for reconnection."""
