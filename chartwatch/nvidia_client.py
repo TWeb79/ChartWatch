@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -100,7 +101,7 @@ def analyze(
     if instruction_text:
         user_content += f"\n\nAdditional instructions:\n{instruction_text}"
 
-    chat_start = __import__("time").monotonic()
+    chat_start = time.monotonic()
     response = client.chat.completions.create(
         model=model,
         messages=[
@@ -116,7 +117,7 @@ def analyze(
         max_tokens=max_tokens,
         stream=False,
     )
-    chat_elapsed = __import__("time").monotonic() - chat_start
+    chat_elapsed = time.monotonic() - chat_start
     log_event(log, "nvidia_chat_timing", {"model": model, "chat_elapsed_s": round(chat_elapsed, 2)})
 
     raw = response.choices[0].message.content
