@@ -6,7 +6,7 @@ via list_tools(), and a TOOL_NAMES mapping for logical-to-actual tool name
 resolution with automatic fallback matching.
 
 Author: Inventions4All - github:TWeb79
-Version: 1.1.0  (deployment: 2026-08-02)
+Version: 1.2.0  (deployment: 2026-08-02)
 """
 
 from __future__ import annotations
@@ -169,6 +169,20 @@ class CTraderMCPClient:
                     list(self.available_tools.keys()),
                 )
 
+    async def _ensure_connected(self) -> bool:
+        """Ensure the MCP session is connected, reconnecting if needed.
+
+        Returns True if the session is active, False if connection failed.
+        """
+        if self.session is not None:
+            return True
+        try:
+            await self.connect()
+            return self.session is not None
+        except Exception as e:
+            log_event(log, "mcp_connect_failed", {"error": str(e)})
+            return False
+
     async def call(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """Call a tool on the cTrader MCP server.
 
@@ -181,7 +195,10 @@ class CTraderMCPClient:
 
         Raises:
             RuntimeError: If the tool is not available on the server.
+            ConnectionError: If the MCP session is not connected and cannot connect.
         """
+        if not await self._ensure_connected():
+            raise ConnectionError("MCP session not connected and auto-connect failed")
         actual_name = self._resolved_tools.get(tool_name)
         if actual_name is None:
             actual_name = _find_tool_name(tool_name, self.available_tools)
@@ -273,7 +290,13 @@ class CTraderMCPClient:
         return result
 
     async def get_accounts(self) -> list[dict[str, Any]]:
-        """Fetch all available cTrader accounts."""
+        """Fetch all available cTrader accounts.
+
+        Ensures the MCP session is connected before calling tools.
+        Returns an empty list if the connection cannot be established.
+        """
+        if not await self._ensure_connected():
+            return []
         raw = await self.call("get_accounts_list", {})
         if isinstance(raw, dict):
             return raw.get("accounts", [])

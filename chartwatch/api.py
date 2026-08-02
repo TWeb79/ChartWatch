@@ -169,8 +169,12 @@ async def mcp_accounts():
     scheduler = _state.get("scheduler")
     if not scheduler or not scheduler.mcp:
         return {"accounts": [], "selectedAccountId": None, "selectedBalance": None}
-    accounts = await scheduler.mcp.get_accounts()
     account_id = scheduler.cfg.get("ctrader_mcp", {}).get("account_id")
+    try:
+        accounts = await scheduler.mcp.get_accounts()
+    except Exception as e:
+        log_event(log, "mcp_accounts_error", {"error": str(e)})
+        accounts = []
     selected_balance = None
     if account_id is not None:
         try:
