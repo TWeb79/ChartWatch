@@ -3,10 +3,12 @@
 import json
 import os
 import tempfile
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from chartwatch import decision, guardrails, storage
+from chartwatch.scheduler import Scheduler
 
 
 class TestDecisionValidate:
@@ -247,3 +249,63 @@ class TestStorage:
             assert len(rows) == 1
         finally:
             os.unlink(db_path)
+
+
+class TestStalePositionFiltering:
+    """Tests for filtering stale positions from MCP results."""
+
+    def _make_scheduler(self):
+        """Create a Scheduler with mocked dependencies for testing."""
+        loop = __import__("asyncio").new_event_loop()
+        cfg = {"ctrader_mcp": {"url": "http://localhost:8000", "account_id": "123"}}
+        s = Scheduler.__new__(Scheduler)
+        s.cfg = cfg
+        s._closed_position_ids = set()
+        s.mcp = MagicMock()
+        s._loop = loop
+        return s
+
+    def test_get_position_id_various_keys(self):
+        """Position ID extracted from multiple possible key names."""
+        s = self._make_scheduler()
+        assert s._get_position_id({"id": "123"}) == "123"
+        assert s._get_position_id({"position_id": 456}) == "456"
+        assert s._get_position_id({"positionId": "789"}) == "789"
+        assert s._get_position_id({"foo": "bar"}) is None
+
+    @pytest.mark.asyncio
+    async def test_filtered_positions_removes_closed_ids(self):
+        """Positions whose IDs are in _closed_position_ids are filtered out."""
+        s = self._make_scheduler()
+        s._closed_position_ids = {"123"}
+        s.mcp.get_open_positions = AsyncMock(return_value=[
+            {"id": "123", "symbol": "BTCUSD"},
+            {"id": "456", "symbol": "ETHUSD"},
+        ])
+        result = await s.get_filtered_positions()
+        assert len(result) == 1
+        assert result[0]["id"] == "456"
+
+    @pytest.mark.asyncio
+    async def test_filtered_positions_no_closed_ids(self):
+        """When no positions are tracked as closed, all are returned."""
+        s = self._make_scheduler()
+        positions = [{"id": "123", "symbol": "BTCUSD"}]
+        s.mcp.get_open_positions = AsyncMock(return_value=positions)
+        result = await s.get_filtered_positions()
+        assert result == positions
+
+    def test_clear_closed_position_ids(self):
+        """clear_closed_position_ids empties the tracking set."""
+        s = self._make_scheduler()
+        s._closed_position_ids = {"123", "456"}
+        s.clear_closed_position_ids()
+        assert s._closed_position_ids == set()
+
+    @pytest.mark.asyncio
+    async def test_filtered_positions_handles_mcp_error(self):
+        """If MCP raises, empty list is returned."""
+        s = self._make_scheduler()
+        s.mcp.get_open_positions = AsyncMock(side_effect=ConnectionError("MCP down"))
+        result = await s.get_filtered_positions()
+        assert result == []

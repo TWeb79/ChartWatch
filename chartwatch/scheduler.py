@@ -45,6 +45,9 @@ class Scheduler:
         self._ollama_times: list[float] = []
         self._ollama_window = 10
         self._ctrader_alerted = False
+        # Track position IDs that were closed locally to filter stale MCP results
+        # (cTrader MCP may return cached/stale positions for a short period)
+        self._closed_position_ids: set[str] = set()
 
     async def start(self):
         self._running = True
@@ -84,6 +87,9 @@ class Scheduler:
                     try:
                         await self.mcp.connect()
                         self._ctrader_alerted = False
+                        # Clear tracked closed positions on reconnect — position
+                        # state may have changed on the server side
+                        self._closed_position_ids.clear()
                     except Exception as e:
                         # MCP connection failed — check if cTrader is running
                         ctrader_status = ctrader_check.check_ctrader_running()
@@ -161,6 +167,7 @@ class Scheduler:
                     try:
                         await asyncio.wait_for(self.mcp.connect(), timeout=15.0)
                         self._ctrader_alerted = False
+                        self._closed_position_ids.clear()
                         break
                     except (Exception, asyncio.TimeoutError) as e:
                         if attempt == max_retries:
@@ -180,6 +187,52 @@ class Scheduler:
             await self._run_cycle()
         except Exception as e:
             await self.on_event("error", {"message": str(e)})
+
+    def _get_position_id(self, pos: dict) -> str | None:
+        """Extract position ID from a position dict (handles multiple key names)."""
+        for key in ("id", "position_id", "positionId"):
+            val = pos.get(key)
+            if val is not None:
+                return str(val)
+        return None
+
+    async def get_filtered_positions(self) -> list[dict[str, Any]]:
+        """Fetch open positions from MCP, filtering out locally-closed positions.
+
+        The cTrader MCP may return cached/stale position data for a brief
+        period after a position is closed. To prevent phantom positions
+        from blocking new trades or appearing in the UI, position IDs that
+        were closed via this application are tracked in
+        ``self._closed_position_ids`` and filtered out here.
+        """
+        try:
+            positions = await self.mcp.get_open_positions()
+        except Exception as e:
+            log_event(log, "positions_fetch_error", {"error": str(e)})
+            positions = []
+
+        if not self._closed_position_ids:
+            return positions
+
+        filtered = [
+            p for p in positions
+            if self._get_position_id(p) not in self._closed_position_ids
+        ]
+        removed = len(positions) - len(filtered)
+        if removed > 0:
+            log_event(log, "positions_filtered_stale", {
+                "removed": removed,
+                "closed_ids": list(self._closed_position_ids),
+            })
+        return filtered
+
+    def clear_closed_position_ids(self) -> None:
+        """Clear the set of locally-closed position IDs.
+
+        Called when the MCP session reconnects, since position state
+        may have changed on the server side.
+        """
+        self._closed_position_ids.clear()
 
     async def _run_cycle(self):
         cfg = self.cfg
@@ -204,10 +257,10 @@ class Scheduler:
         await self.on_event("capture", {"cycle_id": cycle_id, "path": screenshot_path})
         await self.on_event("log", {"message": f"Screenshot taken and stored: {screenshot_path}"})
 
-        # 2. current position context (best-effort; TODO wire real symbol)
+        # 2. current position context (best-effort; filters stale positions)
         try:
             log_event(log, "mcp_call", {"tool": "get_positions", "status": "started"})
-            positions = await self.mcp.get_open_positions()
+            positions = await self.get_filtered_positions()
             log_event(log, "mcp_response", {"tool": "get_positions", "status": "ok", "count": len(positions)})
         except Exception as e:
             log_event(log, "mcp_error", {"tool": "get_positions", "error": str(e)})
@@ -384,6 +437,13 @@ class Scheduler:
             if isinstance(pos_id, str):
                 if open_position_action == "close":
                     result = await self.mcp.close_position(pos_id)
+                    # Track closed position to filter stale MCP results
+                    self._closed_position_ids.add(pos_id)
+                    log_event(log, "closed_position_tracked", {
+                        "cycle_id": cycle_id,
+                        "position_id": pos_id,
+                        "total_tracked": len(self._closed_position_ids),
+                    })
                     if isinstance(result, dict):
                         result["symbol"] = position_context.get("symbol", "")
                         result["action"] = "close"

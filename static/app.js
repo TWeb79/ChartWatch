@@ -419,8 +419,8 @@ function addHistoryRow(row, targetBody) {
     };
   }
 
-  targetBody.append(detailsTr);
   targetBody.append(tr);
+  targetBody.append(detailsTr);
 }
 
 async function loadHistory() {
@@ -485,6 +485,7 @@ async function loadOpenPositions() {
     const data = await res.json();
     if (positionsLoadingEl) positionsLoadingEl.classList.add("hidden");
     const positions = data.positions || [];
+    if (openCountEl) openCountEl.textContent = String(positions.length);
     if (positions.length === 0) {
       if (positionsEmptyEl) positionsEmptyEl.classList.remove("hidden");
       if (positionsBody) positionsBody.innerHTML = "";
@@ -509,21 +510,24 @@ function addPositionRow(pos, tbody) {
   const symbol = pos.symbol || "-";
   const direction = pos.direction || pos.side || "-";
   const entryPrice = pos.entry_price || pos.opening_price || pos.entryPrice || "-";
-  const sl = pos.stop_loss || pos.sl || "-";
-  const tp = pos.take_profit || pos.tp || "-";
+  const currentPrice = pos.current_price || pos.mark_price || pos.currentPrice || "-";
+  const sl = pos.stop_loss || pos.sl || "";
+  const tp = pos.take_profit || pos.tp || "";
   const volume = pos.volume || pos.vol || "-";
-  const pnl = pos.pnl || pos.PnL || pos.profit_loss || "-";
-  const pnlClass = (typeof pnl === "number" && pnl >= 0) ? "pnl-positive" : (typeof pnl === "number" ? "pnl-negative" : "");
+  const pnlVal = pos.pnl || pos.PnL || pos.profit_loss || 0;
+  const pnl = typeof pnlVal === "number" ? pnlVal.toFixed(2) : escapeHtml(String(pnlVal));
+  const pnlClass = (typeof pnlVal === "number" && pnlVal >= 0) ? "pnl-positive" : (typeof pnlVal === "number" ? "pnl-negative" : "");
 
   tr.innerHTML = `
     <td><code>${escapeHtml(String(posId))}</code></td>
     <td>${escapeHtml(symbol)}</td>
     <td class="direction-${direction.toLowerCase()}">${escapeHtml(direction)}</td>
     <td>${entryPrice}</td>
-    <td>${sl}</td>
-    <td>${tp}</td>
+    <td>${currentPrice}</td>
+    <td>${sl || "-"}</td>
+    <td>${tp || "-"}</td>
     <td>${volume}</td>
-    <td class="${pnlClass}">${typeof pnl === "number" ? pnl.toFixed(2) : escapeHtml(String(pnl))}</td>
+    <td class="${pnlClass}">${pnl}</td>
     <td><button class="btn-close-position" data-position-id="${escapeHtml(String(posId))}">Close</button></td>
   `;
 
@@ -552,6 +556,114 @@ function addPositionRow(pos, tbody) {
   };
 
   tbody.appendChild(tr);
+}
+
+const historyTbody = document.getElementById("position-history-tbody");
+const historyLoadingEl = document.getElementById("history-loading");
+const historyEmptyEl = document.getElementById("history-empty");
+const openCountEl = document.getElementById("open-count");
+const historyCountEl = document.getElementById("history-count");
+
+async function loadPositionHistory() {
+  if (!historyTbody) return;
+  try {
+    const res = await fetch("/api/positions/history");
+    const data = await res.json();
+    if (historyLoadingEl) historyLoadingEl.classList.add("hidden");
+    const positions = data.positions || [];
+    if (positions.length === 0) {
+      if (historyEmptyEl) historyEmptyEl.classList.remove("hidden");
+      if (historyCountEl) historyCountEl.textContent = "0";
+    } else {
+      if (historyEmptyEl) historyEmptyEl.classList.add("hidden");
+      if (historyCountEl) historyCountEl.textContent = String(positions.length);
+      historyTbody.innerHTML = "";
+      positions.forEach(pos => {
+        addHistoryPositionRow(pos, historyTbody);
+      });
+    }
+  } catch (e) {
+    if (historyLoadingEl) {
+      historyLoadingEl.textContent = "Error loading history";
+      historyLoadingEl.classList.remove("hidden");
+    }
+  }
+}
+
+function addHistoryPositionRow(pos, tbody) {
+  const tr = document.createElement("tr");
+  const date = _formatDate(pos);
+  const symbol = pos.symbol || "-";
+  const direction = pos.direction || pos.side || "-";
+  const entryPrice = pos.entry_price || pos.opening_price || pos.entryPrice || "-";
+  const closePrice = pos.close_price || pos.closing_price || pos.closePrice || "-";
+  const volume = pos.volume || pos.vol || "-";
+  const pnl = pos.pnl || pos.PnL || pos.profit_loss || 0;
+  const pnlClass = (typeof pnl === "number" && pnl >= 0) ? "pnl-positive" : (typeof pnl === "number" ? "pnl-negative" : "");
+
+  tr.innerHTML = `
+    <td>${escapeHtml(date)}</td>
+    <td>${escapeHtml(symbol)}</td>
+    <td class="direction-${direction.toLowerCase()}">${escapeHtml(direction)}</td>
+    <td>${entryPrice}</td>
+    <td>${closePrice}</td>
+    <td>${volume}</td>
+    <td class="${pnlClass}">${typeof pnl === "number" ? pnl.toFixed(2) : escapeHtml(String(pnl))}</td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function _formatDate(pos) {
+  const ts = pos.timestamp || pos.time || pos.close_time || pos.open_time || pos.date;
+  if (!ts) return "-";
+  try {
+    const d = new Date(parseFloat(ts) * 1000);
+    return d.toLocaleString();
+  } catch (e) {
+    return String(ts);
+  }
+}
+
+// Tab switching for Positions section
+const tabBtns = document.querySelectorAll(".tab-btn");
+tabBtns.forEach(btn => {
+  btn.addEventListener("click", () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+    btn.classList.add("active");
+    const content = document.getElementById(`tab-${tab}-content`);
+    if (content) content.classList.add("active");
+    if (tab === "history") loadPositionHistory();
+  });
+});
+
+const refreshPositionsBtn = document.getElementById("refresh-positions-btn");
+if (refreshPositionsBtn) {
+  refreshPositionsBtn.onclick = async () => {
+    refreshPositionsBtn.disabled = true;
+    refreshPositionsBtn.textContent = "Refreshing...";
+    try {
+      const res = await fetch("/api/positions/refresh", { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        log("Positions refreshed — cleared cached closed position IDs");
+      } else {
+        log("Refresh failed: " + data.error);
+      }
+    } catch (e) {
+      log("Refresh error: " + e.message);
+    } finally {
+      refreshPositionsBtn.disabled = false;
+      refreshPositionsBtn.textContent = "Refresh";
+    }
+    const activeTab = document.querySelector(".tab-content.active");
+    if (activeTab && activeTab.id === "tab-history-content") {
+      loadPositionHistory();
+    } else {
+      loadOpenPositions();
+    }
+  };
 }
 
 const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -1082,6 +1194,10 @@ if (accountSelect) {
         selectedAccountId = parsed;
         log(`Settings: selected cTrader account id ${parsed}`);
         loadAccountSelector();
+        // Refresh positions when account is switched
+        loadOpenPositions();
+        loadPositionHistory();
+        fetchMcpAccounts();
       }
     } catch (e) {
       console.error("Failed to set cTrader account:", e);

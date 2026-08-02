@@ -530,10 +530,41 @@ async def get_positions():
     if not scheduler:
         return {"ok": False, "error": "scheduler not initialized"}
     try:
-        positions = await scheduler.mcp.get_open_positions()
+        positions = await scheduler.get_filtered_positions()
         return {"ok": True, "positions": positions}
     except Exception as e:
         log_event(log, "api_positions_error", {"error": str(e)})
+        return {"ok": False, "error": str(e), "positions": []}
+
+
+@app.post("/api/positions/refresh")
+async def refresh_positions():
+    """Force-refresh positions by clearing the locally-tracked closed positions
+    and re-fetching from the cTrader MCP. Use when the MCP returns stale data."""
+    scheduler = _state.get("scheduler")
+    if not scheduler:
+        return {"ok": False, "error": "scheduler not initialized"}
+    scheduler._closed_position_ids.clear()
+    log_event(log, "api_positions_refresh", {})
+    try:
+        positions = await scheduler.get_filtered_positions()
+        await scheduler.on_event("positions_update", {"positions": positions})
+        return {"ok": True, "positions": positions, "cleared_cache": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "positions": []}
+
+
+@app.get("/api/positions/history")
+async def get_position_history():
+    """Fetch closed position history for the selected account (current year)."""
+    scheduler = _state.get("scheduler")
+    if not scheduler:
+        return {"ok": False, "error": "scheduler not initialized"}
+    try:
+        history = await scheduler.mcp.get_position_history()
+        return {"ok": True, "positions": history}
+    except Exception as e:
+        log_event(log, "api_position_history_error", {"error": str(e)})
         return {"ok": False, "error": str(e), "positions": []}
 
 
@@ -545,11 +576,13 @@ async def close_position(position_id: str):
     log_event(log, "api_close_position", {"position_id": position_id})
     try:
         result = await scheduler.mcp.close_position(position_id)
+        # Track closed position to filter stale MCP results
+        scheduler._closed_position_ids.add(position_id)
         await scheduler.on_event("log", {
             "message": f"Position {position_id} closed via API",
         })
-        # Refresh positions on frontend
-        positions = await scheduler.mcp.get_open_positions()
+        # Refresh positions on frontend using filtered list
+        positions = await scheduler.get_filtered_positions()
         await scheduler.on_event("positions_update", {"positions": positions})
         return {"ok": True, "result": result, "positions": positions}
     except Exception as e:

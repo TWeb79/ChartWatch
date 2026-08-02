@@ -123,6 +123,25 @@ def _extract_text(result: Any) -> str:
     return "\n".join(parts)
 
 
+def _filter_by_year(item: dict[str, Any], year_start_ts: float) -> bool:
+    """Check if a deal/order/position dict has a timestamp >= year_start_ts.
+
+    Looks for common timestamp field names: ``timestamp``, ``time``,
+    ``created``, ``open_time``, ``close_time``, ``date``, ``ts``.
+    If no timestamp is found, the item is included (assumed recent).
+    """
+    for field in ("timestamp", "time", "created", "open_time", "close_time", "date", "ts"):
+        val = item.get(field)
+        if val is None:
+            continue
+        try:
+            ts = float(val)
+            return ts >= year_start_ts
+        except (ValueError, TypeError):
+            continue
+    return True  # No timestamp found — include by default
+
+
 def _parse_json_text(text: str) -> Any:
     """Parse JSON from the first JSON object/array found in text."""
     text = text.strip()

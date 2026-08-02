@@ -36,12 +36,15 @@
         </svg>
         Dashboard
       </button>
-      <button class="nav-item" data-section="scheduler">
+      <button class="nav-item" data-section="positions">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10"></circle>
-          <polyline points="12 6 12 12 16 14"></polyline>
+          <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z"></path>
+          <line x1="12" y1="2" x2="12" y2="6"></line>
+          <line x1="12" y1="18" x2="12" y2="22"></line>
+          <line x1="2" y1="12" x2="6" y2="12"></line>
+          <line x1="18" y1="12" x2="22" y2="12"></line>
         </svg>
-        Scheduler
+        Positions
       </button>
       <button class="nav-item" data-section="history">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -105,28 +108,6 @@
           </div>
 
           <div class="card">
-            <h2>Open Positions</h2>
-            <div id="positions-loading" class="positions-loading">Loading...</div>
-            <table id="positions-table" class="history-table">
-              <thead>
-                <tr>
-                  <th>Position ID</th>
-                  <th>Symbol</th>
-                  <th>Direction</th>
-                  <th>Entry Price</th>
-                  <th>SL</th>
-                  <th>TP</th>
-                  <th>Volume</th>
-                  <th>P/L</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-            <div id="positions-empty" class="positions-empty hidden">No open positions</div>
-          </div>
-
-          <div class="card">
             <h2>Cycle History (Summary)</h2>
             <table id="history-table-summary" class="history-table">
               <thead>
@@ -162,6 +143,59 @@
             </thead>
             <tbody></tbody>
           </table>
+        </div>
+       </section>
+
+      <!-- Positions Section -->
+      <section id="section-positions" class="section">
+        <div class="card">
+          <div class="card-header">
+            <h2>Positions</h2>
+            <button id="refresh-positions-btn" class="btn-ghost btn-small">Refresh</button>
+          </div>
+          <div class="positions-tabs">
+            <button id="tab-open-positions" class="tab-btn active" data-tab="open">Open (<span id="open-count">0</span>)</button>
+            <button id="tab-history-positions" class="tab-btn" data-tab="history">History (<span id="history-count">0</span>)</button>
+          </div>
+          <div id="tab-open-content" class="tab-content active">
+            <div id="positions-loading" class="positions-loading">Loading...</div>
+            <div id="positions-empty" class="positions-empty hidden">No open positions</div>
+            <table id="positions-table" class="positions-table">
+              <thead>
+                <tr>
+                  <th>Position ID</th>
+                  <th>Symbol</th>
+                  <th>Direction</th>
+                  <th>Entry Price</th>
+                  <th>Current Price</th>
+                  <th>SL</th>
+                  <th>TP</th>
+                  <th>Volume</th>
+                  <th>P/L</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="tab-history-content" class="tab-content hidden">
+            <div id="history-loading" class="positions-loading">Loading...</div>
+            <div id="history-empty" class="positions-empty hidden">No closed positions this year</div>
+            <table id="position-history-table" class="positions-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Symbol</th>
+                  <th>Direction</th>
+                  <th>Entry Price</th>
+                  <th>Close Price</th>
+                  <th>Volume</th>
+                  <th>P/L</th>
+                </tr>
+              </thead>
+              <tbody id="position-history-tbody"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
