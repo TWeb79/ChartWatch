@@ -350,6 +350,13 @@ function addHistoryRow(row, targetBody) {
     const t = row.new_trade;
     actionHtml = `${t.direction ?? ""} SL=${t.sl ?? ""} TP=${t.tp ?? ""}`.trim() || "-";
   }
+  // Show action-specific details from the recommendation
+  let actionDetailsHtml = "";
+  if (row.open_position_action) {
+    const parts = [row.open_position_action];
+    if (row.new_sl) parts.push(`new_sl=${row.new_sl}`);
+    actionDetailsHtml = parts.join(" ");
+  }
 
   const statusClass = row.status ? `history-badge ${row.status}` : "";
   const statusHtml = row.status ? `<span class="${statusClass}">${row.status}</span>` : "-";
@@ -378,7 +385,16 @@ function addHistoryRow(row, targetBody) {
           <p><span class="label">Date</span>${ts}</p>
           ${assessment ? `<p><span class="label">Assessment</span><br/>${escapeHtml(row.assessment)}</p>` : ""}
           ${newTrade ? `<p><span class="label">Trade</span><br/>${row.new_trade.direction} SL=${row.new_trade.sl} TP=${row.new_trade.tp}</p>` : ""}
+          ${actionDetailsHtml ? `<p><span class="label">Action</span><br/>${escapeHtml(actionDetailsHtml)}</p>` : ""}
           ${guardrail ? `<p><span class="label">Guardrail</span><br/>${row.guardrail_status}${row.guardrail_reason ? ` — ${escapeHtml(row.guardrail_reason)}` : ""}</p>` : ""}
+          ${mcpResult ? (row.mcp_result.volume ? `<p><span class="label">Volume</span><br/>${row.mcp_result.volume}</p>` : "") : ""}
+          ${mcpResult ? (row.mcp_result.entry_price ? `<p><span class="label">Entry Price</span><br/>${row.mcp_result.entry_price}</p>` : "") : ""}
+          ${mcpResult ? (row.mcp_result.position_id ? `<p><span class="label">Position ID</span><br/>${row.mcp_result.position_id}</p>` : "") : ""}
+          ${mcpResult ? (row.mcp_result.symbol ? `<p><span class="label">Symbol</span><br/>${row.mcp_result.symbol}</p>` : "") : ""}
+          ${!mcpResult && row.status === "guardrail_rejected" ? `<p><span class="label">Trade</span><br/><span class="text-muted">Not executed — rejected by guardrails</span></p>` : ""}
+          ${!mcpResult && row.status === "skipped" ? `<p><span class="label">Trade</span><br/><span class="text-muted">Not executed — insufficient free margin (calculated volume below 0.1)</span></p>` : ""}
+          ${!mcpResult && row.status === "denied" ? `<p><span class="label">Trade</span><br/><span class="text-muted">Not executed — manually denied</span></p>` : ""}
+          ${!mcpResult && row.status === "auto_denied_timeout" ? `<p><span class="label">Trade</span><br/><span class="text-muted">Not executed — approval timed out</span></p>` : ""}
           ${mcpResult ? `<p><span class="label">MCP Result</span><br/><pre>${JSON.stringify(row.mcp_result, null, 2)}</pre></p>` : ""}
           <p><span class="label">Cycle ID</span> #${cycleId}</p>
         </div>
@@ -417,7 +433,7 @@ async function loadHistory() {
   lastHistoryData = dataKey;
   if (historyBody) historyBody.innerHTML = "";
   if (historyBodySummary) historyBodySummary.innerHTML = "";
-  rows.forEach(r => {
+   rows.forEach(r => {
     let response = {};
     try { response = JSON.parse(r.model_response || "{}"); } catch (e) {}
     let mcpResult = {};
@@ -431,6 +447,8 @@ async function loadHistory() {
       assessment: response.assessment,
       action: response.open_position_action || (response.new_trade ? "new_trade" : "-"),
       new_trade: response.new_trade,
+      open_position_action: response.open_position_action,
+      new_sl: response.new_sl,
       status: r.action_status,
       guardrail_status: r.guardrail_status,
       guardrail_reason: r.guardrail_reason,
@@ -445,12 +463,95 @@ async function loadHistory() {
       assessment: response.assessment,
       action: response.open_position_action || (response.new_trade ? "new_trade" : "-"),
       new_trade: response.new_trade,
+      open_position_action: response.open_position_action,
+      new_sl: response.new_sl,
       status: r.action_status,
       guardrail_status: r.guardrail_status,
       guardrail_reason: r.guardrail_reason,
       mcp_result: mcpResult,
     }, historyBodySummary);
-  });
+   });
+}
+
+const positionsTable = document.getElementById("positions-table");
+const positionsBody = positionsTable ? positionsTable.querySelector("tbody") : null;
+const positionsLoadingEl = document.getElementById("positions-loading");
+const positionsEmptyEl = document.getElementById("positions-empty");
+
+async function loadOpenPositions() {
+  if (!positionsBody) return;
+  try {
+    const res = await fetch("/api/positions");
+    const data = await res.json();
+    if (positionsLoadingEl) positionsLoadingEl.classList.add("hidden");
+    const positions = data.positions || [];
+    if (positions.length === 0) {
+      if (positionsEmptyEl) positionsEmptyEl.classList.remove("hidden");
+      if (positionsBody) positionsBody.innerHTML = "";
+    } else {
+      if (positionsEmptyEl) positionsEmptyEl.classList.add("hidden");
+      positionsBody.innerHTML = "";
+      positions.forEach(pos => {
+        addPositionRow(pos, positionsBody);
+      });
+    }
+  } catch (e) {
+    if (positionsLoadingEl) {
+      positionsLoadingEl.textContent = "Error loading positions";
+      positionsLoadingEl.classList.remove("hidden");
+    }
+  }
+}
+
+function addPositionRow(pos, tbody) {
+  const tr = document.createElement("tr");
+  const posId = pos.id || pos.position_id || pos.positionId || "-";
+  const symbol = pos.symbol || "-";
+  const direction = pos.direction || pos.side || "-";
+  const entryPrice = pos.entry_price || pos.opening_price || pos.entryPrice || "-";
+  const sl = pos.stop_loss || pos.sl || "-";
+  const tp = pos.take_profit || pos.tp || "-";
+  const volume = pos.volume || pos.vol || "-";
+  const pnl = pos.pnl || pos.PnL || pos.profit_loss || "-";
+  const pnlClass = (typeof pnl === "number" && pnl >= 0) ? "pnl-positive" : (typeof pnl === "number" ? "pnl-negative" : "");
+
+  tr.innerHTML = `
+    <td><code>${escapeHtml(String(posId))}</code></td>
+    <td>${escapeHtml(symbol)}</td>
+    <td class="direction-${direction.toLowerCase()}">${escapeHtml(direction)}</td>
+    <td>${entryPrice}</td>
+    <td>${sl}</td>
+    <td>${tp}</td>
+    <td>${volume}</td>
+    <td class="${pnlClass}">${typeof pnl === "number" ? pnl.toFixed(2) : escapeHtml(String(pnl))}</td>
+    <td><button class="btn-close-position" data-position-id="${escapeHtml(String(posId))}">Close</button></td>
+  `;
+
+  const closeBtn = tr.querySelector(".btn-close-position");
+  closeBtn.onclick = async () => {
+    if (!confirm(`Close position ${posId} (${symbol})?`)) return;
+    closeBtn.disabled = true;
+    closeBtn.textContent = "Closing...";
+    try {
+      const res = await fetch(`/api/positions/${encodeURIComponent(posId)}/close`, { method: "POST" });
+      const result = await res.json();
+      if (result.ok) {
+        tr.remove();
+        await loadOpenPositions();
+        log("Position closed: " + posId);
+      } else {
+        closeBtn.disabled = false;
+        closeBtn.textContent = "Close";
+        log("Failed to close position: " + result.error);
+      }
+    } catch (e) {
+      closeBtn.disabled = false;
+      closeBtn.textContent = "Close";
+      log("Error closing position: " + e.message);
+    }
+  };
+
+  tbody.appendChild(tr);
 }
 
 const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -833,6 +934,12 @@ function connectWs() {
         log(`⚠ Model test error: ${payload.error}`);
       }
     }
+    if (type === "executed" || type === "positions_update") {
+      loadOpenPositions();
+    }
+    if (type === "captured" || (type === "log" && payload.message && payload.message.includes("Screenshot captured"))) {
+      fetchMcpAccounts();
+    }
   };
   ws.onclose = () => {
     updateWsStatus("WS: disconnected — reconnecting...", "disconnected");
@@ -863,9 +970,11 @@ document.getElementById("ollama-screenshot-close").onclick = hideOllamaOverlay;
 
 loadWindows();
 loadHistory();
+loadOpenPositions();
 updateIntervalHint();
 fetchSystemStatus();
 fetchLlmHealth();
+fetchMcpAccounts();
 setInterval(fetchLlmHealth, 60000);
 
 const providerSelect = document.getElementById("setting-provider");

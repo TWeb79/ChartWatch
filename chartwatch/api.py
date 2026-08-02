@@ -524,6 +524,42 @@ def get_history(limit: int = 50):
     return _state["store"].recent(limit)
 
 
+@app.get("/api/positions")
+async def get_positions():
+    scheduler = _state.get("scheduler")
+    if not scheduler:
+        return {"ok": False, "error": "scheduler not initialized"}
+    try:
+        positions = await scheduler.mcp.get_open_positions()
+        return {"ok": True, "positions": positions}
+    except Exception as e:
+        log_event(log, "api_positions_error", {"error": str(e)})
+        return {"ok": False, "error": str(e), "positions": []}
+
+
+@app.post("/api/positions/{position_id}/close")
+async def close_position(position_id: str):
+    scheduler = _state.get("scheduler")
+    if not scheduler:
+        return {"ok": False, "error": "scheduler not initialized"}
+    log_event(log, "api_close_position", {"position_id": position_id})
+    try:
+        result = await scheduler.mcp.close_position(position_id)
+        await scheduler.on_event("log", {
+            "message": f"Position {position_id} closed via API",
+        })
+        # Refresh positions on frontend
+        positions = await scheduler.mcp.get_open_positions()
+        await scheduler.on_event("positions_update", {"positions": positions})
+        return {"ok": True, "result": result, "positions": positions}
+    except Exception as e:
+        log_event(log, "api_close_position_error", {
+            "position_id": position_id,
+            "error": str(e),
+        })
+        return {"ok": False, "error": str(e)}
+
+
 @app.post("/api/approve/{cycle_id}")
 def approve(cycle_id: int):
     log_event(log, "api_approve", {"cycle_id": cycle_id})

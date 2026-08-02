@@ -105,7 +105,29 @@
           </div>
 
           <div class="card">
-            <h2>Cycle History</h2>
+            <h2>Open Positions</h2>
+            <div id="positions-loading" class="positions-loading">Loading...</div>
+            <table id="positions-table" class="history-table">
+              <thead>
+                <tr>
+                  <th>Position ID</th>
+                  <th>Symbol</th>
+                  <th>Direction</th>
+                  <th>Entry Price</th>
+                  <th>SL</th>
+                  <th>TP</th>
+                  <th>Volume</th>
+                  <th>P/L</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div id="positions-empty" class="positions-empty hidden">No open positions</div>
+          </div>
+
+          <div class="card">
+            <h2>Cycle History (Summary)</h2>
             <table id="history-table-summary" class="history-table">
               <thead>
                 <tr>

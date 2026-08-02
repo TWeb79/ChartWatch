@@ -30,17 +30,41 @@ TOOL_NAMES = {
     "modify_position": "modify_position",
     "get_balance": "get_balance",
     "get_symbol_price": "get_symbol_price",
+    "get_account_statistics": "get_account_statistics",
+    "get_deals": "get_deals",
+    "get_order_history": "get_order_history",
 }
 
 _TOOL_ALIASES = {
     "get_positions": ["get_positions", "list_positions", "positions", "GetPositions"],
-    "open_position": ["open_position", "create_position", "OpenPosition", "PlaceOrder"],
-    "close_position": ["close_position", "ClosePosition", "CloseTrade"],
-    "modify_position": ["modify_position", "modify_sl", "ModifyPosition", "ModifyTrade"],
-    "get_balance": ["get_balance", "getAccountBalance", "GetBalance"],
+    "open_position": [
+        "open_position", "create_position", "OpenPosition", "PlaceOrder",
+        "place_market_order", "PlaceMarketOrder",
+    ],
+    "close_position": [
+        "close_position", "ClosePosition", "CloseTrade", "close_position_partial",
+    ],
+    "modify_position": [
+        "modify_position", "modify_sl", "ModifyPosition", "ModifyTrade",
+        "amend_position", "AmendPosition", "amend_order",
+    ],
+    "get_balance": ["get_balance", "getAccountBalance", "GetBalance", "get_account_statistics"],
     "get_symbol_price": [
         "get_symbol_price", "get_symbol_prices", "get_prices", "getQuotes",
         "get_quote", "GetSymbolPrice", "SymbolPrice", "GetPrice",
+        "get_spot_prices", "GetSpotPrices",
+    ],
+    "get_account_statistics": [
+        "get_account_statistics", "getAccountStatistics", "get_stats",
+        "get_account_info", "GetAccountInfo",
+    ],
+    "get_deals": [
+        "get_deals", "getDealHistory", "GetDeals", "deal_history",
+        "get_closed_positions", "closed_positions",
+    ],
+    "get_order_history": [
+        "get_order_history", "getOrderHistory", "GetOrders",
+        "order_history", "orders",
     ],
 }
 
@@ -407,23 +431,59 @@ class CTraderMCPClient:
     async def get_free_margin(self) -> float | None:
         """Fetch the free margin for the configured account.
 
-        Calls the balance endpoint and extracts the ``free_margin`` field.
-        Falls back to ``equity`` if ``free_margin`` is not present, then
-        to ``balance``. Returns ``None`` if the MCP connection cannot be
-        established or the balance call fails.
+        Tries ``get_account_statistics`` first (cTrader specific), then
+        falls back to ``get_balance``. Extracts the ``free_margin`` field
+        from either response; falls back to ``equity`` then ``balance``.
+
+        Returns ``None`` if the MCP connection cannot be established.
         """
+        if not await self._ensure_connected():
+            return None
+
+        # Try get_account_statistics first (cTrader specific, has free_margin)
+        try:
+            stats_tool = _find_tool_name("get_account_statistics", self.available_tools)
+            if stats_tool:
+                raw = await self.call("get_account_statistics", {})
+                if isinstance(raw, dict):
+                    for field in ("free_margin", "equity", "balance"):
+                        val = raw.get(field)
+                        if val is not None:
+                            log_event(log, "mcp_free_margin_from_stats", {
+                                "account_id": self.account_id,
+                                "field": field,
+                                "value": float(val),
+                            })
+                            return float(val)
+        except Exception as e:
+            log_event(log, "mcp_stats_error", {
+                "account_id": self.account_id,
+                "error": str(e),
+            })
+
+        # Fallback: use get_balance which returns a dict with balance info
         balance = await self.get_account_balance()
         if balance.get("balance") is None:
             return None
-        # Prefer free_margin, fall back to equity, then balance
         for field in ("free_margin", "equity", "balance"):
             val = balance.get(field)
             if val is not None:
+                log_event(log, "mcp_free_margin_from_balance", {
+                    "account_id": self.account_id,
+                    "field": field,
+                    "value": float(val),
+                })
                 return float(val)
         return None
 
     async def get_symbol_price(self, symbol: str) -> float | None:
         """Fetch the current market price of a symbol from the cTrader MCP.
+
+        Handles multiple response formats:
+        - ``{"symbol": ..., "ask": ..., "bid": ...}``
+        - ``{"price": ...}``
+        - ``[{"symbol": ..., "ask": ..., "bid": ...}, ...]`` (list of spot prices)
+        - ``{"US500": {"ask": ..., "bid": ...}}`` (dict keyed by symbol)
 
         Args:
             symbol: The trading symbol (e.g. ``"US500"``, ``"EURUSD"``).
@@ -435,22 +495,81 @@ class CTraderMCPClient:
         if not await self._ensure_connected():
             return None
         raw = await self.call("get_symbol_price", {"symbol": symbol})
+
+        # Format 1: direct dict with ask/bid
         if isinstance(raw, dict):
-            # cTrader MCP may return {"symbol": ..., "bid": ..., "ask": ...}
-            # or {"price": ...} or {"rates": [{"ask": ..., "bid": ...}]}
             if "ask" in raw:
                 return float(raw["ask"])
             if "price" in raw:
                 return float(raw["price"])
-            if "rates" in raw and isinstance(raw["rates"], list) and raw["rates"]:
-                rate = raw["rates"][0]
-                if isinstance(rate, dict) and "ask" in rate:
-                    return float(rate["ask"])
+            # Format 3: dict keyed by symbol (from get_spot_prices)
+            if symbol in raw and isinstance(raw[symbol], dict):
+                price_dict = raw[symbol]
+                if "ask" in price_dict:
+                    return float(price_dict["ask"])
+                if "price" in price_dict:
+                    return float(price_dict["price"])
+
+        # Format 2: list of price entries
+        if isinstance(raw, list):
+            for entry in raw:
+                if isinstance(entry, dict):
+                    if entry.get("symbol") == symbol and "ask" in entry:
+                        return float(entry["ask"])
+                    if entry.get("symbol") == symbol and "price" in entry:
+                        return float(entry["price"])
+
         log_event(log, "mcp_price_not_found", {
             "symbol": symbol,
             "raw": str(raw)[:200],
         })
         return None
+
+    async def get_position_history(self) -> list[dict[str, Any]]:
+        """Fetch closed positions (deal history) from the cTrader MCP.
+
+        Tries ``get_deals`` first, then ``get_order_history`` as fallback.
+        Filters results to the current year (timestamp >= Jan 1 of current year).
+        Returns an empty list if the MCP connection cannot be established
+        or no history is available.
+        """
+        if not await self._ensure_connected():
+            return []
+
+        from datetime import datetime
+        year_start = datetime.now().replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        year_start_ts = year_start.timestamp()
+
+        # Try get_deals first
+        try:
+            deals_tool = _find_tool_name("get_deals", self.available_tools)
+            if deals_tool:
+                raw = await self.call("get_deals", {})
+                if isinstance(raw, dict):
+                    # Could be {"deals": [...]} or {"orders": [...]}
+                    items = raw.get("deals") or raw.get("orders") or raw.get("data") or []
+                    if isinstance(items, list):
+                        return [d for d in items if isinstance(d, dict) and _filter_by_year(d, year_start_ts)]
+                if isinstance(raw, list):
+                    return [d for d in raw if isinstance(d, dict) and _filter_by_year(d, year_start_ts)]
+        except Exception as e:
+            log_event(log, "mcp_deals_error", {"error": str(e)})
+
+        # Fallback: get_order_history
+        try:
+            orders_tool = _find_tool_name("get_order_history", self.available_tools)
+            if orders_tool:
+                raw = await self.call("get_order_history", {})
+                if isinstance(raw, dict):
+                    items = raw.get("orders") or raw.get("data") or raw.get("history") or []
+                    if isinstance(items, list):
+                        return [d for d in items if isinstance(d, dict) and _filter_by_year(d, year_start_ts)]
+                if isinstance(raw, list):
+                    return [d for d in raw if isinstance(d, dict) and _filter_by_year(d, year_start_ts)]
+        except Exception as e:
+            log_event(log, "mcp_order_history_error", {"error": str(e)})
+
+        return []
 
     async def verify_account(self) -> dict[str, Any]:
         """Verify the active cTrader account matches the expected account_id.

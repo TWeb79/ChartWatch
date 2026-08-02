@@ -384,8 +384,27 @@ class Scheduler:
             if isinstance(pos_id, str):
                 if open_position_action == "close":
                     result = await self.mcp.close_position(pos_id)
+                    if isinstance(result, dict):
+                        result["symbol"] = position_context.get("symbol", "")
+                        result["action"] = "close"
+                    log_event(log, "position_closed", {
+                        "cycle_id": cycle_id,
+                        "position_id": pos_id,
+                        "symbol": position_context.get("symbol", ""),
+                    })
                 elif open_position_action == "trail_sl" and d.get("new_sl") is not None:
-                    result = await self.mcp.modify_sl(pos_id, d["new_sl"])
+                    new_sl = d["new_sl"]
+                    result = await self.mcp.modify_sl(pos_id, new_sl)
+                    if isinstance(result, dict):
+                        result["symbol"] = position_context.get("symbol", "")
+                        result["action"] = "trail_sl"
+                        result["new_sl"] = new_sl
+                    log_event(log, "position_sl_trailed", {
+                        "cycle_id": cycle_id,
+                        "position_id": pos_id,
+                        "symbol": position_context.get("symbol", ""),
+                        "new_sl": new_sl,
+                    })
             else:
                 log_event(log, "execute_no_position_id", {
                     "cycle_id": cycle_id,
@@ -504,16 +523,25 @@ class Scheduler:
                 sl=t["sl"],
                 tp=t["tp"],
             )
+            # Enrich the result with execution details for the activity log
+            if isinstance(result, dict):
+                result["volume"] = round(volume, 4)
+                result["symbol"] = symbol
+                result["direction"] = t["direction"]
             log_event(log, "trade_executed", {
                 "cycle_id": cycle_id,
                 "symbol": symbol,
                 "direction": t["direction"],
                 "volume": round(volume, 4),
-                "result": str(result)[:200],
+                "entry_price": result.get("entry_price") if isinstance(result, dict) else None,
+                "position_id": result.get("position_id") if isinstance(result, dict) else None,
             })
             await self.on_event("log", {
                 "cycle_id": cycle_id,
-                "message": f"Trade executed: {t['direction']} {symbol} vol={volume:.4f}",
+                "message": (
+                    f"Trade executed: {t['direction']} {symbol} "
+                    f"vol={volume:.4f} SL={t['sl']} TP={t['tp']}"
+                ),
             })
 
         self.store.set_action(cycle_id, "executed", mcp_result=result)

@@ -736,6 +736,95 @@ button {
   color: var(--muted);
 }
 
+.history-badge.skipped {
+  background: rgba(255, 193, 7, 0.2);
+  color: #d97706;
+}
+
+.history-badge.guardrail_rejected {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--red);
+}
+
+.text-muted {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.positions-loading {
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.positions-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.positions-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.positions-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.positions-table td {
+  padding: 6px 8px;
+  border-top: 1px solid var(--border-color);
+  font-size: 13px;
+}
+
+.positions-table .direction-buy {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.positions-table .direction-sell {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.pnl-positive {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.pnl-negative {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.btn-close-position {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-close-position:hover {
+  background: rgba(239, 68, 68, 0.3);
+}
+
+.btn-close-position:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Modal */
 .modal {
   position: fixed;
