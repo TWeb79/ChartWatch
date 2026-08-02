@@ -68,14 +68,35 @@ def analyze(
     model: str,
     host: str,
     instruction_file: str = "",
+    account_balance: Optional[dict[str, Any]] = None,
+    timeout: float = 120.0,
 ) -> dict[str, Any]:
+    """Analyze a screenshot using the Ollama vision model.
+
+    Args:
+        screenshot_path: Path to the screenshot image.
+        position_context: Current open position details, or None.
+        model: Ollama model name to use.
+        host: Ollama server URL.
+        instruction_file: Optional path to a custom instruction file.
+        account_balance: Optional dict with ``balance`` and ``currency``
+            for the configured cTrader account, included in the prompt
+            so the model can suggest appropriate position sizing.
+
+    Returns:
+        Parsed decision dict from the model.
+
+    Raises:
+        ValueError: If the model returns empty or non-JSON output.
+    """
     log_event(log, "ollama_analyze_start", {
         "screenshot": screenshot_path,
         "model": model,
         "host": host,
         "has_instruction_file": bool(instruction_file),
+        "has_account_balance": account_balance is not None,
     })
-    client = ollama.Client(host=host, timeout=120.0)
+    client = ollama.Client(host=host, timeout=timeout)
 
     instruction_text = ""
     if instruction_file:
@@ -89,6 +110,11 @@ def analyze(
     )
 
     user_content = f"Current position context: {context_str}"
+    if account_balance and account_balance.get("balance") is not None:
+        user_content += (
+            f"\n\nCurrent account balance: {account_balance['balance']} "
+            f"{account_balance.get('currency', '')}".strip()
+        )
     if instruction_text:
         user_content += f"\n\nAdditional instructions:\n{instruction_text}"
 

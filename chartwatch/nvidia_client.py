@@ -74,12 +74,38 @@ def analyze(
     top_p: float,
     max_tokens: int,
     instruction_file: str = "",
+    account_balance: dict[str, Any] | None = None,
+    timeout: float = 30.0,
 ) -> dict[str, Any]:
+    """Analyze a screenshot using the NVIDIA NIM vision model.
+
+    Args:
+        screenshot_path: Path to the screenshot image.
+        position_context: Current open position details, or None.
+        model: NVIDIA model name to use.
+        api_key: NVIDIA API key.
+        base_url: NVIDIA NIM base URL.
+        temperature: Sampling temperature.
+        top_p: Top-p sampling.
+        max_tokens: Maximum output tokens.
+        instruction_file: Optional path to a custom instruction file.
+        account_balance: Optional dict with ``balance`` and ``currency``
+            for the configured cTrader account, included in the prompt
+            so the model can suggest appropriate position sizing.
+        timeout: Maximum seconds to wait for the API response.
+
+    Returns:
+        Parsed decision dict from the model.
+
+    Raises:
+        ValueError: If the model returns empty or non-JSON output.
+    """
     log_event(log, "nvidia_analyze_start", {
         "screenshot": screenshot_path,
         "model": model,
         "base_url": base_url,
         "has_instruction_file": bool(instruction_file),
+        "has_account_balance": account_balance is not None,
     })
     client = OpenAI(
         api_key=api_key,
@@ -98,24 +124,38 @@ def analyze(
     )
 
     user_content = f"Current position context: {context_str}"
+    if account_balance and account_balance.get("balance") is not None:
+        user_content += (
+            f"\n\nCurrent account balance: {account_balance['balance']} "
+            f"{account_balance.get('currency', '')}".strip()
+        )
     if instruction_text:
         user_content += f"\n\nAdditional instructions:\n{instruction_text}"
 
     chat_start = time.monotonic()
+    # NVIDIA NIM (OpenAI-compatible) expects images in the content array as
+    # image_url blocks, not as a separate "images" key (which is the Ollama format).
+    encoded_image = _encode_image(screenshot_path)
     response = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": user_content,
-                "images": [_encode_image(screenshot_path)],
+                "content": [
+                    {"type": "text", "text": user_content},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{encoded_image}"},
+                    },
+                ],
             },
         ],
         temperature=temperature,
         top_p=top_p,
         max_tokens=max_tokens,
         stream=False,
+        timeout=timeout,
     )
     chat_elapsed = time.monotonic() - chat_start
     log_event(log, "nvidia_chat_timing", {"model": model, "chat_elapsed_s": round(chat_elapsed, 2)})

@@ -214,9 +214,29 @@ class Scheduler:
             positions = []
         position_context = positions[0] if positions else None
 
+        # 2b. fetch current account balance so the LLM can size positions
+        # appropriately and guardrails use the real equity, not a stale config value.
+        account_balance: Optional[dict[str, Any]] = None
+        try:
+            log_event(log, "mcp_call", {"tool": "get_account_balance", "status": "started"})
+            account_balance = await self.mcp.get_account_balance()
+            log_event(log, "mcp_response", {
+                "tool": "get_account_balance",
+                "status": "ok",
+                "balance": account_balance.get("balance"),
+                "currency": account_balance.get("currency"),
+            })
+        except Exception as e:
+            log_event(log, "mcp_error", {"tool": "get_account_balance", "error": str(e)})
+
         # 3. ask LLM (run in thread to avoid blocking the event loop)
         await self.on_event("log", {"message": "Submitting screenshot to LLM for analysis..."})
-        log_event(log, "llm_submit", {"cycle_id": cycle_id, "provider": self.cfg.get("provider", "ollama"), "model": self.cfg.get("llm_model", self.cfg.get("ollama", {}).get("model", ""))})
+        provider = self.cfg.get("provider", "ollama")
+        llm_model = (
+            self.cfg.get("llm_model", "")
+            or (self.cfg.get("ollama", {}) if provider == "ollama" else self.cfg.get("nvidia", {})).get("model", "")
+        )
+        log_event(log, "llm_submit", {"cycle_id": cycle_id, "provider": provider, "model": llm_model})
         try:
             ollama_start = time.monotonic()
             raw = await asyncio.to_thread(
@@ -224,6 +244,7 @@ class Scheduler:
                 screenshot_path,
                 position_context,
                 self.cfg,
+                account_balance=account_balance,
             )
             ollama_elapsed = time.monotonic() - ollama_start
             self._ollama_times.append(ollama_elapsed)
@@ -264,7 +285,9 @@ class Scheduler:
                 current_price=None,
                 open_positions_count=len(positions),
                 daily_pnl_pct=self.store.daily_pnl_pct(
-                account_value=cfg.get("trading", {}).get("account_value", 0.0)
+                account_value=account_balance.get("balance")
+                if account_balance and account_balance.get("balance")
+                else cfg.get("trading", {}).get("account_value", 0.0)
             ),
                 limits=cfg["risk_limits"],
                 pip_size=pip_size,

@@ -312,6 +312,56 @@ class CTraderMCPClient:
             return raw.get("accounts", [])
         return []
 
+    async def get_account_balance(self) -> dict[str, Any]:
+        """Fetch the balance for the configured account_id.
+
+        Looks up the account in the accounts list returned by
+        ``get_accounts_list`` and returns its embedded ``balance`` field.
+        Falls back to a separate ``get_balance`` tool call if the account
+        is not found in the list or has no balance field.
+
+        Returns:
+            Dict with ``balance`` (float | None), ``currency`` (str | None),
+            and ``account_id`` (int | None). Returns ``balance=None`` if
+            the MCP connection cannot be established.
+        """
+        result: dict[str, Any] = {
+            "account_id": self.account_id,
+            "balance": None,
+            "currency": None,
+        }
+        if self.account_id is None:
+            return result
+        try:
+            accounts = await self.get_accounts()
+            selected = next(
+                (a for a in accounts if a.get("id") == self.account_id), None
+            )
+            if selected and selected.get("balance") is not None:
+                result["balance"] = float(selected["balance"])
+                result["currency"] = selected.get("currency")
+                log_event(log, "mcp_balance_from_list", {
+                    "account_id": self.account_id,
+                    "balance": result["balance"],
+                    "currency": result["currency"],
+                })
+                return result
+            # Fallback: call get_balance explicitly
+            balance_result = await self.call("get_balance", {})
+            if isinstance(balance_result, dict) and balance_result.get("balance") is not None:
+                result["balance"] = float(balance_result["balance"])
+                result["currency"] = balance_result.get("currency")
+                log_event(log, "mcp_balance_from_tool", {
+                    "account_id": self.account_id,
+                    "balance": result["balance"],
+                })
+        except Exception as e:
+            log_event(log, "mcp_balance_error", {
+                "account_id": self.account_id,
+                "error": str(e),
+            })
+        return result
+
     async def verify_account(self) -> dict[str, Any]:
         """Verify the active cTrader account matches the expected account_id.
 

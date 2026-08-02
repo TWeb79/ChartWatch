@@ -17,6 +17,7 @@ def analyze(
     screenshot_path: str,
     position_context: Optional[dict[str, Any]],
     cfg: dict[str, Any],
+    account_balance: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Analyze a screenshot using the configured LLM provider.
 
@@ -26,6 +27,9 @@ def analyze(
         screenshot_path: Path to the screenshot image file.
         position_context: Current open position details, or None.
         cfg: Application configuration dict.
+        account_balance: Optional dict with ``balance`` and ``currency``
+            for the configured cTrader account. Included in the LLM prompt
+            so the model can suggest appropriate position sizing.
 
     Returns:
         Parsed decision dict from the model.
@@ -34,12 +38,25 @@ def analyze(
         ValueError: If the provider is unknown or the model returns invalid data.
     """
     provider = cfg.get("provider", "ollama")
-    model = cfg.get("llm_model", cfg.get("ollama", {}).get("model", ""))
+    ollama_cfg = cfg.get("ollama", {}) if provider == "ollama" else {}
+    nvidia_cfg = cfg.get("nvidia", {}) if provider == "nvidia" else {}
+    # Resolve model per-provider: llm_model override takes priority, then
+    # the provider-specific config key.
+    model = cfg.get("llm_model", "")
+    if not model:
+        if provider == "ollama":
+            model = ollama_cfg.get("model", "")
+        elif provider == "nvidia":
+            model = nvidia_cfg.get("model", "")
     instruction_file = cfg.get("instruction_file", "")
+    timeout = None
+    if provider == "ollama":
+        timeout = ollama_cfg.get("timeout", 120.0)
+    elif provider == "nvidia":
+        timeout = nvidia_cfg.get("timeout", 30.0)
 
     if provider == "ollama":
         from . import ollama_client
-        ollama_cfg = cfg.get("ollama", {})
         log_event(log, "llm_dispatch", {"provider": "ollama", "model": model})
         return ollama_client.analyze(
             screenshot_path=screenshot_path,
@@ -47,11 +64,12 @@ def analyze(
             model=model,
             host=ollama_cfg.get("host", "http://localhost:11434"),
             instruction_file=ollama_cfg.get("instruction_file", instruction_file),
+            account_balance=account_balance,
+            timeout=timeout,
         )
 
     if provider == "nvidia":
         from . import nvidia_client
-        nvidia_cfg = cfg.get("nvidia", {})
         log_event(log, "llm_dispatch", {"provider": "nvidia", "model": model})
         return nvidia_client.analyze(
             screenshot_path=screenshot_path,
@@ -63,6 +81,8 @@ def analyze(
             top_p=nvidia_cfg.get("top_p", 0.95),
             max_tokens=nvidia_cfg.get("max_tokens", 8192),
             instruction_file=nvidia_cfg.get("instruction_file", instruction_file),
+            account_balance=account_balance,
+            timeout=timeout,
         )
 
     raise ValueError(
