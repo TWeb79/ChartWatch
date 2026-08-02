@@ -196,20 +196,34 @@ class Scheduler:
                 return str(val)
         return None
 
+    def _is_valid_position(self, position: Any) -> bool:
+        """Return True for a valid open position dict with at least one identifying field."""
+        if not isinstance(position, dict):
+            return False
+        if self._get_position_id(position) is not None:
+            return True
+        if position.get("symbol") or position.get("position_id") or position.get("positionId"):
+            return True
+        return False
+
     async def get_filtered_positions(self) -> list[dict[str, Any]]:
-        """Fetch open positions from MCP, filtering out locally-closed positions.
+        """Fetch open positions from MCP, filtering out invalid or locally-closed positions.
 
         The cTrader MCP may return cached/stale position data for a brief
         period after a position is closed. To prevent phantom positions
-        from blocking new trades or appearing in the UI, position IDs that
-        were closed via this application are tracked in
-        ``self._closed_position_ids`` and filtered out here.
+        from blocking new trades or appearing in the UI, invalid entries
+        and locally-closed position IDs are filtered out here.
         """
         try:
             positions = await self.mcp.get_open_positions()
         except Exception as e:
             log_event(log, "positions_fetch_error", {"error": str(e)})
             positions = []
+
+        if not isinstance(positions, list):
+            positions = []
+
+        positions = [p for p in positions if self._is_valid_position(p)]
 
         if not self._closed_position_ids:
             return positions
@@ -330,18 +344,35 @@ class Scheduler:
             return
 
         # 5. guardrails
+        current_price = None
+        if d.get("new_trade"):
+            price_symbol = None
+            if position_context and position_context.get("symbol"):
+                price_symbol = position_context.get("symbol")
+            else:
+                price_symbol = cfg.get("trading", {}).get("default_symbol")
+            if isinstance(price_symbol, str) and price_symbol.strip():
+                try:
+                    current_price = await self.mcp.get_symbol_price(price_symbol.strip())
+                except Exception as e:
+                    log_event(log, "guardrail_price_fetch_error", {
+                        "cycle_id": cycle_id,
+                        "symbol": price_symbol,
+                        "error": str(e),
+                    })
+
         try:
             pip_size = cfg.get("trading", {}).get("pip_size", 0.0001)
-            log_event(log, "guardrail_check", {"cycle_id": cycle_id, "pip_size": pip_size})
+            log_event(log, "guardrail_check", {"cycle_id": cycle_id, "pip_size": pip_size, "current_price": current_price})
             guardrails.check(
                 d,
-                current_price=None,
+                current_price=current_price,
                 open_positions_count=len(positions),
                 daily_pnl_pct=self.store.daily_pnl_pct(
-                account_value=account_balance.get("balance")
-                if account_balance and account_balance.get("balance")
-                else cfg.get("trading", {}).get("account_value", 0.0)
-            ),
+                    account_value=account_balance.get("balance")
+                    if account_balance and account_balance.get("balance")
+                    else cfg.get("trading", {}).get("account_value", 0.0)
+                ),
                 limits=cfg["risk_limits"],
                 pip_size=pip_size,
             )
@@ -487,8 +518,15 @@ class Scheduler:
             t = new_trade
             default_symbol = self.cfg.get("trading", {}).get("default_symbol")
             symbol = position_context.get("symbol") if position_context else default_symbol
-            if not isinstance(symbol, str):
-                symbol = "UNKNOWN"
+            if not isinstance(symbol, str) or not symbol.strip():
+                log_event(log, "execute_missing_symbol", {"cycle_id": cycle_id})
+                self.store.set_action(cycle_id, "error", mcp_result={"error": "missing trading symbol"})
+                await self.on_event("error", {
+                    "cycle_id": cycle_id,
+                    "error": "No trading symbol configured for new trade. Set trading.default_symbol or open position symbol.",
+                })
+                return
+            symbol = symbol.strip()
 
             # --- Position sizing based on free margin and leverage ---
             # Formula: volume = (free_margin * leverage) / symbol_price

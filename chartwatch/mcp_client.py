@@ -29,6 +29,7 @@ TOOL_NAMES = {
     "close_position": "close_position",
     "modify_position": "modify_position",
     "get_balance": "get_balance",
+    "get_accounts_list": "get_accounts_list",
     "get_symbol_price": "get_symbol_price",
     "get_account_statistics": "get_account_statistics",
     "get_deals": "get_deals",
@@ -49,6 +50,7 @@ _TOOL_ALIASES = {
         "amend_position", "AmendPosition", "amend_order",
     ],
     "get_balance": ["get_balance", "getAccountBalance", "GetBalance", "get_account_statistics"],
+    "get_accounts_list": ["get_accounts_list", "getAccountsList", "get_accounts", "get_accounts_list", "GetAccounts", "accounts"],
     "get_symbol_price": [
         "get_symbol_price", "get_symbol_prices", "get_prices", "getQuotes",
         "get_quote", "GetSymbolPrice", "SymbolPrice", "GetPrice",

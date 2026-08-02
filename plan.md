@@ -49,31 +49,15 @@ User wants a test that runs once at application startup which:
 5. Shows yellow "Analyzing models..." status in the LLM badge during testing
 6. Uses a 10x10px dummy PNG image and `dummy.md` instructions file for probing
 
-**Implementation:**
-1. Created `chartwatch/llm_utils.py` with `filter_vision_models()`:
-   - Extracts vision patterns and NVIDIA free prefixes to a testable module
-   - For Ollama: all locally installed models are available and free; filter to
-     vision-capable models by name pattern (llava, qwen-vl, mllama, etc.)
-   - For NVIDIA: filter to vision-capable free models by known patterns
-2. Added `GET /api/llm/models/test` endpoint that re-runs the test on demand
-3. Added `_test_and_cache_models()` async function called at startup:
-   - Checks for existing `<provider>_models.json` cache file first
-   - If cache exists, loads it and broadcasts `models_ready` WebSocket event
-   - If no cache, fetches from provider, filters, saves to JSON, broadcasts
-     `models_testing` → `models_ready` (or `models_error`) WebSocket events
-4. Updated `GET /api/llm/models` endpoint to use cached/filtered results
-5. Added WebSocket handlers in `app.js` for `models_testing`, `models_ready`,
-    `models_error` events
-6. Created `chartwatch/dummy.md` (minimal instructions file for testing)
-7. Created `static/dummy_test.png` (10x10px red PNG for image probing tests)
-8. Added 8 tests in `tests/test_llm_models.py`
-9. **Rate limiting**: `GET /api/llm/models/test` endpoint is rate-limited
-   (min 30s between calls) to prevent accidental provider API flooding
-10. **DDOS prevention**: Uses name-pattern filtering, NOT per-model API probing,
-    to avoid flooding the provider with test requests
-11. **404 error handling**: Added specific 404 error handling in `nvidia_client.py`
-    with actionable message guiding users to try known-good models when a model
-    returns "Function not found" (model not deployable for account)
-12. Added README.md instructions for obtaining a free NVIDIA API key at
-    https://build.nvidia.com/models
+## 3. Resolved Improvements
+
+| # | Issue | Files | Severity | Status |
+|---|-------|-------|----------|--------|
+| 7 | Scheduler timing endpoint now exposes a minute-based minimum interval, and the UI interval hint updates correctly | `chartwatch/api.py`, `static/app.js` | Medium | Fixed |
+| 8 | Guardrails now fetch current symbol price before SL distance evaluation, avoiding skipped validation due to missing price lookup | `chartwatch/scheduler.py`, `chartwatch/mcp_client.py` | High | Fixed |
+| 9 | New-trade execution now errors when no valid symbol is configured instead of falling back to `UNKNOWN` | `chartwatch/scheduler.py` | High | Fixed |
+| 10 | LLM response rendering uses the existing `.ollama-summary` container directly, preventing unstable nested markup | `static/app.js` | Medium | Fixed |
+| 11 | cTrader MCP tool alias mapping now includes `get_accounts_list` for account enumeration | `chartwatch/mcp_client.py` | Medium | Fixed |
+| 12 | README and architecture docs were updated for MCP tool discovery, guardrail pricing behavior, and model cache semantics | `README.md`, `ARCHITECTURE.md` | Low | Fixed |
+
 

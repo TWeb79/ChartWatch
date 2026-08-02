@@ -58,27 +58,25 @@ instance. To use it:
    `google/gemma-3-27b-it`, and `nvidia/nemotron-vl-340b`.
 
 3. **Startup behavior:** On first launch the app fetches the model list from
-   NVIDIA, filters to only free vision-capable models, and caches the result
-   in `nvidia_models.json`. On subsequent startups the cached list is used
-   directly. The LLM status badge shows "Analyzing models..." (yellow) while
-   the test runs. Click the status badge to manually refresh the model list.
+   the configured provider, filters to only free vision-capable models, and
+   caches the result in `<provider>_models.json` in the repository root.
+   On subsequent startups the cached list is used directly. The LLM status
+   badge shows "Analyzing models..." (yellow) while the test runs. Click the
+   status badge to manually refresh the model list.
 
 **Switching providers:** To return to Ollama, set `provider: ollama` in
 `config.yaml` and ensure Ollama is running locally.
 
 ## Known TODOs (marked in code)
 
-- `chartwatch/mcp_client.py`: tool names (`open_position`, `close_position`,
-  `modify_position`, `get_positions`) are best-guess placeholders — call
-  `list_tools()` against the real server once connected and adjust. The cTrader
-  MCP server on port 9876 does not currently expose standard MCP protocol
-  endpoints; see `mcp_client.py` inline TODO for the verification script.
+- `chartwatch/mcp_client.py`: tool names are heuristically resolved from the
+  MCP server tool list. If `get_accounts_list` or other account/position tools
+  are not found, update `_TOOL_ALIASES` to match your server's exact names.
 - `chartwatch/guardrails.py`: pip-size conversion is hardcoded for a
-  4-decimal FX pair — needs per-symbol handling for other instrument types.
-- `chartwatch/scheduler.py`: `daily_pnl_pct` and `current_price` are stubbed
-  to placeholder values — wire these to real MCP quote/history calls.
-- Position `symbol` in `_execute()` falls back to `"UNKNOWN"` when no
-  position is open — needs a configured default symbol per target window.
+  4-decimal FX pair and may need per-symbol handling for non-FX instruments.
+- `chartwatch/scheduler.py`: `daily_pnl_pct` and current symbol price are now
+  wired to actual MCP data when available, but additional quote sources may be
+  needed for non-standard symbols.
 
 ## Safety notes
 

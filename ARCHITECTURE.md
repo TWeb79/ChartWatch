@@ -2,7 +2,7 @@
 
 ## Overview
 
-ChartWatch is a macOS desktop application that periodically captures a screenshot of a target application window, sends it to a local Ollama vision model for analysis, and — after approval (manual with a 60s auto-deny timeout, or auto-approve) — executes the resulting trade action via cTrader's local MCP API.
+ChartWatch is a macOS desktop application that periodically captures a screenshot of a target application window, sends it to a vision-capable LLM provider (local Ollama or NVIDIA NIM) for analysis, and — after approval (manual with a 60s auto-deny timeout, or auto-approve) — executes the resulting trade action via cTrader's local MCP API.
 
 ## System Structure
 

@@ -309,3 +309,12 @@ class TestStalePositionFiltering:
         s.mcp.get_open_positions = AsyncMock(side_effect=ConnectionError("MCP down"))
         result = await s.get_filtered_positions()
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_filtered_positions_filters_invalid_positions(self):
+        """Invalid or None entries from MCP are removed before rendering."""
+        s = self._make_scheduler()
+        s.mcp.get_open_positions = AsyncMock(return_value=[None, {}, {"id": "123", "symbol": "EURUSD"}])
+        result = await s.get_filtered_positions()
+        assert len(result) == 1
+        assert result[0]["id"] == "123"

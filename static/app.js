@@ -125,12 +125,12 @@ function showOllamaResponse(parsed) {
   expandedResponse = false;
   const detailsEl = document.getElementById("ollama-details");
   const expandBtn = document.getElementById("ollama-expand-btn");
-  const summaryEl = document.querySelector(".ollama-summary");
-  const summaryTarget = summaryEl || (() => {
+  let summaryEl = document.querySelector(".ollama-summary");
+  if (!summaryEl) {
     ollamaResponseEl.classList.remove("ollama-empty");
     ollamaResponseEl.innerHTML = '<div class="ollama-summary"></div>';
-    return ollamaResponseEl.querySelector(".ollama-summary");
-  })();
+    summaryEl = ollamaResponseEl.querySelector(".ollama-summary");
+  }
 
   const direction = parsed.trend_10min || "-";
   const confidence = parsed.confidence != null ? parsed.confidence : "-";
@@ -138,16 +138,15 @@ function showOllamaResponse(parsed) {
 
   const directionClass = direction === "up" ? "up" : direction === "down" ? "down" : "sideways";
 
-  let html = `<div class="ollama-summary">`;
+  let html = "";
   if (lastCapturePath) {
     html += `<img class="ollama-thumbnail" src="/${lastCapturePath}" alt="Screenshot" />`;
   }
   html += `<span class="ollama-direction ${directionClass}">${direction}</span>`;
   html += `<span class="ollama-confidence">Confidence: ${confidence}</span>`;
   html += `<span class="ollama-time">${timeStr}</span>`;
-  html += `</div>`;
 
-  summaryTarget.innerHTML = html;
+  summaryEl.innerHTML = html;
 
   detailsEl.textContent = JSON.stringify(parsed, null, 2);
   detailsEl.classList.add("hidden");
@@ -203,13 +202,13 @@ async function updateIntervalHint() {
   try {
     const res = await fetch("/api/scheduler/timing");
     const data = await res.json();
-    if (data.min_minutes) {
-      const minMin = data.min_minutes;
+    const minMin = data.min_minutes ?? (data.min_interval_s ? Math.ceil(data.min_interval_s / 60) : null);
+    if (minMin) {
       intervalInput.min = minMin;
       intervalMinHint.dataset.minMinutes = minMin;
-      const avgMin = (data.avg_ollama_time_s / 60).toFixed(1);
+      const avgMin = data.avg_ollama_time_s != null ? (data.avg_ollama_time_s / 60).toFixed(1) : "?";
       intervalMinHint.textContent = `Min: ${minMin} min (Ollama avg ${avgMin}min + 30s)`;
-      effectiveIntervalSeconds = data.effective_interval_s;
+      effectiveIntervalSeconds = data.effective_interval_s || (data.effective_interval_min ? data.effective_interval_min * 60 : 300);
     }
   } catch (e) {
     console.error("Failed to fetch timing info:", e);
@@ -484,7 +483,10 @@ async function loadOpenPositions() {
     const res = await fetch("/api/positions");
     const data = await res.json();
     if (positionsLoadingEl) positionsLoadingEl.classList.add("hidden");
-    const positions = data.positions || [];
+    let positions = data.positions || [];
+    positions = positions.filter(pos => {
+      return pos && (pos.id || pos.position_id || pos.positionId || pos.symbol || pos.side);
+    });
     if (openCountEl) openCountEl.textContent = String(positions.length);
     if (positions.length === 0) {
       if (positionsEmptyEl) positionsEmptyEl.classList.remove("hidden");

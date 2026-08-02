@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 import urllib.request
 from pathlib import Path
@@ -270,11 +271,15 @@ def scheduler_timing():
     avg_s = scheduler.avg_ollama_time()
     min_interval_s = scheduler.min_interval_seconds()
     configured_s = scheduler.cfg["interval_minutes"] * 60
+    effective_s = max(configured_s, min_interval_s)
+    min_minutes = int(math.ceil(min_interval_s / 60.0))
     return {
         "avg_ollama_time_s": round(avg_s, 2),
         "min_interval_s": round(min_interval_s, 2),
+        "min_minutes": min_minutes,
         "configured_interval_s": configured_s,
-        "effective_interval_s": round(max(configured_s, min_interval_s), 2),
+        "effective_interval_s": round(effective_s, 2),
+        "effective_interval_min": int(math.ceil(effective_s / 60.0)),
         "ollama_samples": len(scheduler._ollama_times),
     }
 
