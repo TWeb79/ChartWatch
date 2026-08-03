@@ -339,12 +339,12 @@ class CTraderMCPClient:
     ) -> dict[str, Any]:
         """Open a new position on the cTrader MCP server."""
         return await self.call(TOOL_NAMES["open_position"], {
-            "symbol": symbol,
-            "direction": direction,
+            "symbolName": symbol,
+            "side": direction,
             "volume": volume,
             "volumeType": "Lots",
-            "stop_loss": sl,
-            "take_profit": tp,
+            "stopLoss": sl,
+            "takeProfit": tp,
         })
 
     async def close_position(self, position_id: str) -> dict[str, Any]:

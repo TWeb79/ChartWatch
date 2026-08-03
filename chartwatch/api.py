@@ -495,6 +495,7 @@ async def set_llm_model(request: Request):
         return JSONResponse({"error": "model required"}, status_code=400)
     log_event(log, "api_llm_model_set", {"model": model})
     cfg = cfg_module.update({"llm_model": model})
+    _state["scheduler"].cfg = cfg
     return {"ok": True, "llm_model": cfg.get("llm_model")}
 
 
